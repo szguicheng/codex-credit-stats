@@ -10,3 +10,5 @@ dist/
 .codex-credit-stats/
 web-auth-data/
 *-browser-profile/
+connection.json
+external-browser-port.json

@@ -170,7 +170,8 @@ function openExternalUrl(url) {
 export async function captureDailyUsageWithExternalBrowser({
   onStatus = () => {},
   dataDir = path.join(os.homedir(), ".codex-credit-stats"),
-  profileDir = path.join(os.homedir(), ".codex-credit-stats", "external-browser-profile")
+  profileDir = path.join(os.homedir(), ".codex-credit-stats", "external-browser-profile"),
+  interactive = true
 } = {}) {
   const { chromium } = await import("playwright");
   mkdirSync(dataDir, { recursive: true });
@@ -191,8 +192,10 @@ export async function captureDailyUsageWithExternalBrowser({
   if (!connectedBrowser) {
     const browser = findExternalBrowser();
     if (!browser) {
-      openExternalUrl(ANALYTICS_URL);
-      throw new Error("已打开系统默认浏览器。当前系统没有检测到可自动回传 response 的 Chrome/Edge；请安装 Chrome 或 Edge。 ");
+      if (interactive) openExternalUrl(ANALYTICS_URL);
+      throw new Error(interactive
+        ? "已打开系统默认浏览器。当前系统没有检测到可自动回传 response 的 Chrome/Edge；请安装 Chrome 或 Edge。"
+        : "无法使用已保存的 ChatGPT 连接；请点击连接按钮重新连接 ChatGPT。");
     }
 
     const previousPort = port;
@@ -261,6 +264,11 @@ export async function captureDailyUsageWithExternalBrowser({
     if (!page) return;
     const authenticated = await pageLooksAuthenticated(page);
     if (authenticated !== true) {
+      if (!interactive) {
+        settled = true;
+        rejectCapture(new Error("已保存的 ChatGPT 连接已失效；请点击连接按钮重新连接 ChatGPT。"));
+        return;
+      }
       if (loginStatus !== "waiting") {
         loginStatus = "waiting";
         onStatus({ phase: "auth", message: "外部浏览器尚未登录 ChatGPT，请完成登录；localhost 页面会自动等待。" });
@@ -286,12 +294,21 @@ export async function captureDailyUsageWithExternalBrowser({
   for (const page of context.pages()) pageCreated(page);
 
   timeoutHandle = setTimeout(() => {
-    if (!settled) rejectCapture(new Error("等待外部浏览器登录或 analytics 响应超时。"));
+    if (!settled) {
+      rejectCapture(new Error(interactive
+        ? "等待外部浏览器登录或 analytics 响应超时。"
+        : "无法使用已保存的 ChatGPT 连接；请点击连接按钮重新连接 ChatGPT。"));
+    }
   }, 300000);
   redirectTimer = setInterval(() => void returnToAnalyticsAfterLogin(), 1200);
 
   try {
-    onStatus({ phase: "auth", message: "请在外部浏览器中完成 ChatGPT 登录；登录后会自动读取 analytics response…" });
+    onStatus({
+      phase: "auth",
+      message: interactive
+        ? "请在外部浏览器中完成 ChatGPT 登录；登录后会自动读取 analytics response…"
+        : "正在验证已保存的 ChatGPT 连接…"
+    });
     const page = context.pages()[0] || await context.newPage();
     await page.goto(ANALYTICS_URL, { waitUntil: "domcontentloaded" }).catch(() => {});
     const payload = await capturePromise;

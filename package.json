@@ -18,7 +18,10 @@
     "server.mjs",
     "renderer/**/*",
     "src/**/*",
-    "README.md"
+    "README.md",
+    "README.zh-CN.md",
+    "README.ja.md",
+    "docs/**/*"
   ],
   "engines": {
     "node": ">=20"

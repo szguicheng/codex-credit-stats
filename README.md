@@ -6,6 +6,10 @@
 
 Codex Credit Stats is a local web tool for estimating your Codex weekly credit limit from your actual usage. It shows the estimated limit for each usage cycle, daily credit usage, current-window remaining credits, and reference amounts for common plans.
 
+## Why Credits matter
+
+Token counts and other proxy metrics cannot show your actual monthly allowance. Codex officially exposes the quota as a percentage, which indicates relative usage but not the actual size of the allowance. Credits provide the clearest and most accurate view of the real quota.
+
 ## Install
 
 Requirements: Node.js 20 or later.
@@ -17,7 +21,7 @@ npm install
 npm start
 ```
 
-The tool opens a local page in your browser. Click **Connect ChatGPT and refresh**, then sign in to ChatGPT in the browser window if needed.
+The tool opens a local page in your browser. On the first run, click **Connect ChatGPT and refresh**, then sign in to ChatGPT in the browser window if needed. After a successful connection, later starts try to reconnect automatically.
 
 ## Purpose
 
@@ -36,6 +40,10 @@ The tool helps you understand how many Codex credits your current usage pattern 
 3. It combines those totals with the local Codex session usage records.
 4. It treats each earlier quota update as a boundary, groups history into seven-day cycles, and treats the latest update-to-date period as the current cycle.
 5. It estimates the weekly limit for each cycle and presents the result in the dashboard.
+
+## Connection persistence
+
+After the first successful connection, the app saves a non-sensitive local connection marker and reuses the login state in its dedicated local browser profile. On later starts it first tries to refresh automatically. If the saved connection no longer works, the attempt stops, the connection button becomes available, and the page asks you to reconnect. Passwords, cookies, and authorization tokens are not written to the project files.
 
 ## Information it reads
 

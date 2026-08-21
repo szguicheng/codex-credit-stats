@@ -2,8 +2,8 @@
 
 import { randomBytes } from "node:crypto";
 import { spawn } from "node:child_process";
-import { existsSync } from "node:fs";
-import { readFile } from "node:fs/promises";
+import { existsSync, readFileSync } from "node:fs";
+import { readFile, writeFile } from "node:fs/promises";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
@@ -24,6 +24,7 @@ const defaultPort = Number(process.env.CODEX_CREDIT_PORT || 4317);
 const sessionToken = randomBytes(32).toString("hex");
 const browserDataDir = process.env.CODEX_CREDIT_DATA_DIR || dataDir;
 const browserProfileDir = process.env.CODEX_CREDIT_PROFILE_DIR || path.join(browserDataDir, "external-browser-profile");
+const connectionFile = path.join(browserDataDir, "connection.json");
 
 const mimeTypes = {
   ".css": "text/css; charset=utf-8",
@@ -33,10 +34,25 @@ const mimeTypes = {
   ".svg": "image/svg+xml"
 };
 
+function readSavedConnection() {
+  try {
+    const value = JSON.parse(readFileSync(connectionFile, "utf8"));
+    return value?.version === 1 && typeof value.lastConnectedAt === "string" ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+const savedConnection = readSavedConnection();
+
 const state = {
   busy: false,
   report: null,
-  status: { phase: "idle", message: "准备就绪。点击刷新后自动切分周期。", mode: "idle" }
+  status: { phase: "idle", message: "准备就绪。点击刷新后自动切分周期。", mode: "idle" },
+  connection: {
+    saved: Boolean(savedConnection),
+    lastConnectedAt: savedConnection?.lastConnectedAt || null
+  }
 };
 const eventClients = new Set();
 
@@ -63,7 +79,8 @@ function stateSnapshot() {
   return {
     busy: state.busy,
     report: state.report,
-    status: state.status
+    status: state.status,
+    connection: state.connection
   };
 }
 
@@ -75,6 +92,15 @@ function publishStatus(message, phase = "busy", mode = "busy") {
   state.status = { message, phase, mode };
   const snapshot = stateSnapshot();
   for (const client of eventClients) sendEvent(client, snapshot);
+}
+
+async function saveConnectionMarker() {
+  const lastConnectedAt = new Date().toISOString();
+  await writeFile(connectionFile, JSON.stringify({ version: 1, lastConnectedAt }, null, 2), {
+    encoding: "utf8",
+    mode: 0o600
+  });
+  state.connection = { saved: true, lastConnectedAt };
 }
 
 function serveStatic(response, pathname) {
@@ -97,15 +123,20 @@ function serveStatic(response, pathname) {
   });
 }
 
-async function runSync() {
+async function runSync({ automatic = false } = {}) {
   if (state.busy) return;
   state.busy = true;
   state.report = null;
-  publishStatus("正在连接外部浏览器中的 ChatGPT analytics…", "auth", "busy");
+  publishStatus(
+    automatic ? "正在尝试使用已保存的 ChatGPT 连接…" : "正在连接外部浏览器中的 ChatGPT analytics…",
+    "auth",
+    "busy"
+  );
   try {
     const captured = await captureDailyUsageWithExternalBrowser({
       dataDir: browserDataDir,
       profileDir: browserProfileDir,
+      interactive: !automatic,
       onStatus: ({ message, phase }) => publishStatus(message, phase || "auth", "busy")
     });
     publishStatus("正在读取本地 Codex session 用量快照…", "sessions", "busy");
@@ -122,11 +153,15 @@ async function runSync() {
     report.source = "authenticated-browser";
     report.plan = captured.plan;
     state.report = report;
+    await saveConnectionMarker();
     state.busy = false;
     publishStatus("统计完成。周期估计已更新。", "ready", "ready");
   } catch (error) {
     state.busy = false;
-    publishStatus(error?.message || "统计失败，请重试。", "error", "error");
+    const message = automatic
+      ? "无法使用已保存的 ChatGPT 连接，请点击“连接 ChatGPT 并刷新”重新连接。"
+      : error?.message || "统计失败，请重试。";
+    publishStatus(message, "error", "error");
   }
 }
 
@@ -178,7 +213,7 @@ const server = http.createServer(async (request, response) => {
       jsonResponse(response, 409, { error: "统计正在进行中。" });
       return;
     }
-    void runSync();
+    void runSync({ automatic: false });
     jsonResponse(response, 202, { ok: true });
     return;
   }
@@ -217,4 +252,5 @@ server.listen(port, host, () => {
   const url = `http://${host}:${port}/?token=${sessionToken}`;
   console.log(`Codex Credit Stats running at ${url}`);
   if (shouldOpen) void openLocalUrl(port);
+  if (savedConnection) setTimeout(() => void runSync({ automatic: true }), 0);
 });

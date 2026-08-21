@@ -8,7 +8,7 @@ Codex Credit Stats is a local web tool for estimating your Codex weekly credit l
 
 ## Why Credits matter
 
-Token counts and other proxy metrics cannot show your actual monthly allowance. Codex officially exposes the quota as a percentage, which indicates relative usage but not the actual size of the allowance. Credits provide the clearest and most accurate view of the real quota.
+Token counts and other proxy metrics cannot show your actual monthly allowance. Codex officially exposes the quota as a percentage, which indicates relative usage but not the actual size of the allowance. **Credits provide the clearest and most accurate view of the real quota.**
 
 ## Install
 
@@ -43,7 +43,7 @@ The tool helps you understand how many Codex credits your current usage pattern 
 
 ## Connection persistence
 
-After the first successful connection, the app saves a non-sensitive local connection marker and reuses the login state in its dedicated local browser profile. On later starts it first tries to refresh automatically. If the saved connection no longer works, the attempt stops, the connection button becomes available, and the page asks you to reconnect. Passwords, cookies, and authorization tokens are not written to the project files.
+After the first successful connection, the app saves a non-sensitive local connection marker at `~/.codex-credit-stats/connection.json` and reuses the login state in its dedicated local browser profile. On later starts it first tries to refresh automatically. If the saved connection no longer works, the attempt stops, the connection button becomes available, and the page asks you to reconnect. Passwords, cookies, and authorization tokens are not written to the project files.
 
 ## Information it reads
 

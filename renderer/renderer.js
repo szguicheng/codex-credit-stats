@@ -8,9 +8,12 @@ function number(value, digits = 0) {
   return Number(value).toLocaleString("zh-CN", { maximumFractionDigits: digits });
 }
 
-function percent(value) {
+function percent(value, digits = 1) {
   if (value == null || !Number.isFinite(Number(value))) return "—";
-  return `${Number(value).toLocaleString("zh-CN", { maximumFractionDigits: 1 })}%`;
+  return `${Number(value).toLocaleString("zh-CN", {
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits
+  })}%`;
 }
 
 function setStatus(message, mode = "idle") {
@@ -99,7 +102,7 @@ function renderCycleChart(cycles, references = []) {
   empty.style.display = "none";
   const width = Math.max(760, svg.parentElement.clientWidth || 960);
   const height = 360;
-  const margin = { top: 28, right: 116, bottom: 78, left: 76 };
+  const margin = { top: 28, right: 116, bottom: 78, left: 112 };
   const plotWidth = width - margin.left - margin.right;
   const plotHeight = height - margin.top - margin.bottom;
   svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
@@ -145,7 +148,15 @@ function renderCycleChart(cycles, references = []) {
   svg.append(frame);
 
   const axisTitles = svgElement("g", { class: "axis-titles" });
-  const yTitle = svgElement("text", { x: 16, y: margin.top + plotHeight / 2, class: "axis-title", "data-axis": "y", transform: `rotate(-90 16 ${margin.top + plotHeight / 2})` });
+  const yTitle = svgElement("text", {
+    x: 22,
+    y: margin.top + plotHeight / 2,
+    class: "axis-title",
+    "data-axis": "y",
+    "text-anchor": "middle",
+    "dominant-baseline": "middle",
+    transform: `rotate(-90 22 ${margin.top + plotHeight / 2})`
+  });
   yTitle.textContent = "预估周限额（credits/week）";
   const xTitle = svgElement("text", { x: margin.left + plotWidth / 2, y: height - 8, class: "axis-title", "data-axis": "x", "text-anchor": "middle" });
   xTitle.textContent = "周期（从旧到新）";
@@ -274,10 +285,10 @@ function renderReport(report) {
     ? `${latestCycle.fromDate} → ${latestCycle.toDate}${latestCycle.kind === "current" ? " · 当前周期" : ""}`
     : "尚未形成可估算周期";
   $("confidenceRange").textContent = range ? `${number(range.lower, 0)} – ${number(range.upper, 0)}` : "—";
-  $("currentRemaining").textContent = percent(remaining);
+  $("currentRemaining").textContent = percent(remaining, 3);
   $("usageProgress").style.width = `${Math.min(100, Math.max(0, Number(usedPercent) || 0))}%`;
   $("currentUsedLabel").textContent = usedPercent == null ? "已使用 —" : `已使用 ${percent(usedPercent)}`;
-  $("currentRemainingCredits").textContent = remainingCredits == null ? "估算剩余 — credits" : `估算剩余 ${number(remainingCredits, 3)} credits`;
+  $("currentRemainingCredits").textContent = remainingCredits == null ? "估算剩余 — credits" : `估算剩余 ${number(remainingCredits, 0)} credits`;
   $("resetDate").textContent = report.local?.boundaryResetDate || "—";
   $("nextResetDate").textContent = localDateTime(report.local?.currentReset, timeZone);
   $("dailyCredits").textContent = number(report.daily?.creditsInAvailableRange ?? report.daily?.creditsInRequestedRange);

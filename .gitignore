@@ -1,0 +1,12 @@
+node_modules/
+.DS_Store
+
+# Legacy desktop-app files; this repository contains only the localhost web version.
+electron/
+release/
+dist/
+
+# Local runtime data and browser profiles.
+.codex-credit-stats/
+web-auth-data/
+*-browser-profile/

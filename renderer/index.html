@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Codex Credit Stats</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <div class="brand-lockup">
+          <div class="brand-mark">C</div>
+          <div>
+            <div class="eyebrow">PERSONAL ANALYTICS</div>
+            <h1>Codex Credit Stats</h1>
+          </div>
+        </div>
+        <div id="connectionPill" class="connection-pill idle">未连接</div>
+      </header>
+
+      <main>
+        <section class="control-card card">
+          <div class="section-heading">
+            <div>
+              <div class="eyebrow">LIVE SYNC</div>
+              <h2>自动刷新统计</h2>
+            </div>
+            <button id="refreshButton" class="button primary">连接 ChatGPT 并刷新</button>
+          </div>
+          <div class="control-hint">自动读取 analytics 日汇总和本地 session 快照，以最近一次额度更新为锚点切分周期。</div>
+        </section>
+
+        <div id="statusBanner" class="status-banner idle" role="status" aria-live="polite">准备就绪。点击刷新后自动切分周期。</div>
+
+        <section class="hero-grid">
+          <article class="hero-card card">
+            <div class="card-label">最近周期 · 周限额</div>
+            <div class="hero-number"><span id="weeklyLimit">—</span><small> credits/week</small></div>
+            <div id="estimateCaption" class="muted">等待一次统计</div>
+            <div class="confidence-block">
+              <span>比例取整区间</span>
+              <strong id="confidenceRange">—</strong>
+            </div>
+          </article>
+
+          <article class="metric-card card">
+            <div class="card-label">当前窗口剩余额度</div>
+            <div class="metric-number"><span id="currentRemaining">—</span><small> 剩余</small></div>
+            <div class="progress-track"><div id="usageProgress" class="progress-fill"></div></div>
+            <div id="currentUsedLabel" class="metric-foot">已使用 —</div>
+            <div id="currentRemainingCredits" class="metric-foot">估算剩余 — credits</div>
+          </article>
+
+          <article class="metric-card card">
+            <div class="card-label">额度更新</div>
+            <div id="resetDate" class="metric-text">—</div>
+            <div class="metric-foot">上一次更新</div>
+            <div id="nextResetDate" class="metric-text secondary-text">—</div>
+            <div class="metric-foot">预计下一次更新（精确到分钟）</div>
+          </article>
+
+          <article class="metric-card card">
+            <div class="card-label">已使用 credits 总计</div>
+            <div class="metric-number"><span id="dailyCredits">—</span><small> credits</small></div>
+            <div id="dailyCoverage" class="metric-foot">—</div>
+            <div id="sourceLabel" class="source-badge">未读取</div>
+          </article>
+        </section>
+
+        <section class="card cycle-card">
+          <div class="section-heading compact">
+            <div>
+              <div class="eyebrow">CYCLE ESTIMATES</div>
+              <h2>周期周限额估计</h2>
+            </div>
+            <div id="cycleSummary" class="chart-total">—</div>
+          </div>
+          <div class="chart-subtitle">横轴从旧到新；历史周期固定 7 天，最右侧为上次额度更新至网页最新日期。</div>
+          <div class="cycle-chart-wrap">
+            <svg id="cycleChart" class="cycle-chart" role="img" aria-label="周期周限额估计散点连线图" viewBox="0 0 960 360" preserveAspectRatio="none"></svg>
+            <div id="cycleChartEmpty" class="empty-state">完成一次刷新后显示周期估计。</div>
+          </div>
+          <div id="cycleLegend" class="cycle-legend"></div>
+          <div id="cycleDetails" class="cycle-details" aria-live="polite"></div>
+        </section>
+
+        <section class="content-grid">
+          <article class="card chart-card">
+            <div class="section-heading compact">
+              <div>
+                <div class="eyebrow">SERVER SOURCE</div>
+                <h2>每日 credits 使用量</h2>
+              </div>
+              <div id="chartTotal" class="chart-total">—</div>
+            </div>
+            <div id="dailyChart" class="daily-chart">
+              <div class="empty-state">完成一次刷新后显示每日用量。</div>
+            </div>
+          </article>
+
+          <article class="card plan-card">
+            <div class="section-heading compact">
+              <div>
+                <div class="eyebrow">PLAN REFERENCE</div>
+                <h2>套餐参考额度</h2>
+              </div>
+              <div class="mini-dot"></div>
+            </div>
+            <div id="planStatus" class="plan-status">未从 analytics 识别具体套餐，以下为静态参考值。</div>
+            <div id="planRows" class="plan-rows"></div>
+            <div class="diagnostic-note">用最近周期估计与识别到的套餐参考量对比；识别不到套餐时仍保留三档静态参考。</div>
+          </article>
+        </section>
+      </main>
+
+      <footer class="footer">
+        <span>本地计算 · 不保存网页 token</span>
+        <span id="lastUpdated">尚未更新</span>
+      </footer>
+    </div>
+    <script src="./renderer.js"></script>
+  </body>
+</html>

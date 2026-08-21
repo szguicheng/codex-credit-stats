@@ -329,6 +329,23 @@ export function estimateWeeklyCredits({ dailyRows, snapshots, timeZone }) {
   const cycles = buildCreditCycles(rows, selected, resolvedTimeZone);
   const currentCycle = cycles.at(-1) ?? null;
   const previousCycle = cycles.length > 1 ? cycles.at(-2) : null;
+  const referenceCycle = cycles
+    .slice(0, -1)
+    .reverse()
+    .find((cycle) => cycle.estimate?.impliedWeeklyCredits > 0) ?? null;
+  const referenceQuota = referenceCycle?.estimate?.impliedWeeklyCredits
+    ?? currentCycle?.estimate?.impliedWeeklyCredits
+    ?? null;
+  const currentWindowCredits = currentCycle?.credits ?? null;
+  const currentWindowUsedPercent = referenceQuota > 0 && currentWindowCredits != null
+    ? (currentWindowCredits / referenceQuota) * 100
+    : current.usedPercent ?? null;
+  const currentWindowRemainingPercent = currentWindowUsedPercent == null
+    ? null
+    : Math.max(0, 100 - currentWindowUsedPercent);
+  const currentWindowRemainingCredits = referenceQuota > 0 && currentWindowCredits != null
+    ? Math.max(0, referenceQuota - currentWindowCredits)
+    : null;
   const boundaryResetDate = selected.currentWindowStartEpoch == null
     ? null
     : dateInTimeZone(selected.currentWindowStartEpoch * 1000, resolvedTimeZone);
@@ -367,12 +384,21 @@ export function estimateWeeklyCredits({ dailyRows, snapshots, timeZone }) {
       latest: currentCycle?.estimate ?? previousCycle?.estimate ?? null,
       previousWindowApprox: previousCycle?.estimate ?? null,
       currentWindowApprox: currentCycle?.estimate ?? null,
+      currentWindow: {
+        usedCredits: currentWindowCredits,
+        referenceQuota,
+        referenceCycle: referenceCycle?.label ?? null,
+        usedPercent: currentWindowUsedPercent,
+        remainingPercent: currentWindowRemainingPercent,
+        remainingCredits: currentWindowRemainingCredits,
+        source: referenceCycle ? "latest-completed-cycle" : "local-snapshot-fallback"
+      },
       naiveRequestedRange: estimateWithRounding(dailyCreditsInAvailableRange, current.usedPercent)
     },
     notes: [
       "当前周期从最近一次额度更新到网页数据最新日期；历史周期从该更新点向前按 7 天切分。",
       "daily-workspace-usage-counts 只有日粒度，因此更新日的 credits 不能精确拆分到小时。",
-      "本地 used_percent 是整数快照，roundingRange 按 ±0.5 个百分点给出比例取整区间。"
+      "当前窗口比例优先使用当前窗口 credits ÷ 最近完成周期的预估周限额；没有历史完整周期时才回退到本地 used_percent。"
     ]
   };
 }

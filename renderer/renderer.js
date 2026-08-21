@@ -271,14 +271,18 @@ function renderReport(report) {
   const latestCycle = cycles.at(-1);
   const latestEstimate = report.estimates?.latest || latestCycle?.estimate;
   const current = report.local?.currentWindowLatest;
+  const currentWindow = report.estimates?.currentWindow;
   const timeZone = report.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone;
   const range = latestEstimate?.roundingRange;
-  const usedPercent = current?.usedPercent;
-  const remaining = usedPercent == null ? null : Math.max(0, 100 - Number(usedPercent));
+  const fallbackUsedPercent = current?.usedPercent;
+  const usedPercent = currentWindow?.usedPercent ?? fallbackUsedPercent;
+  const remaining = currentWindow?.remainingPercent
+    ?? (usedPercent == null ? null : Math.max(0, 100 - Number(usedPercent)));
   const currentEstimate = report.estimates?.currentWindowApprox || latestEstimate;
-  const remainingCredits = remaining == null || !currentEstimate?.impliedWeeklyCredits
-    ? null
-    : currentEstimate.impliedWeeklyCredits * (remaining / 100);
+  const remainingCredits = currentWindow?.remainingCredits
+    ?? (remaining == null || !currentEstimate?.impliedWeeklyCredits
+      ? null
+      : currentEstimate.impliedWeeklyCredits * (remaining / 100));
 
   $("weeklyLimit").textContent = number(latestEstimate?.impliedWeeklyCredits, 0);
   $("estimateCaption").textContent = latestCycle
@@ -287,8 +291,11 @@ function renderReport(report) {
   $("confidenceRange").textContent = range ? `${number(range.lower, 0)} – ${number(range.upper, 0)}` : "—";
   $("currentRemaining").textContent = percent(remaining, 3);
   $("usageProgress").style.width = `${Math.min(100, Math.max(0, Number(usedPercent) || 0))}%`;
-  $("currentUsedLabel").textContent = usedPercent == null ? "已使用 —" : `已使用 ${percent(usedPercent)}`;
+  $("currentUsedLabel").textContent = usedPercent == null ? "已使用 —" : `已使用 ${percent(usedPercent, 3)}`;
   $("currentRemainingCredits").textContent = remainingCredits == null ? "估算剩余 — credits" : `估算剩余 ${number(remainingCredits, 0)} credits`;
+  $("currentReferenceLabel").textContent = currentWindow?.referenceQuota == null
+    ? "参考预估 — credits/week"
+    : `参考预估 ${number(currentWindow.referenceQuota, 0)} credits/week`;
   $("resetDate").textContent = report.local?.boundaryResetDate || "—";
   $("nextResetDate").textContent = localDateTime(report.local?.currentReset, timeZone);
   $("dailyCredits").textContent = number(report.daily?.creditsInAvailableRange ?? report.daily?.creditsInRequestedRange);

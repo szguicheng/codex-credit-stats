@@ -23,6 +23,12 @@ npm start
 
 The tool opens a local page in your browser. On the first run, click **Connect ChatGPT and refresh**, then sign in to ChatGPT in the browser window if needed. After a successful connection, later starts try to reconnect automatically.
 
+You can also start the published package directly with:
+
+```bash
+npx codex-credit-stats
+```
+
 ## Purpose
 
 The tool helps you understand how many Codex credits your current usage pattern implies for a weekly limit. It provides:
@@ -40,6 +46,8 @@ The tool helps you understand how many Codex credits your current usage pattern 
 3. It combines those totals with the local Codex session usage records.
 4. It treats each earlier quota update as a boundary, groups history into seven-day cycles, and treats the latest update-to-date period as the current cycle.
 5. It estimates the weekly limit for each cycle and presents the result in the dashboard.
+
+For the current window, the dashboard calculates the used percentage from current-window credits divided by the latest completed cycle's estimated weekly quota. If no completed cycle is available, it falls back to the local session snapshot.
 
 ## Connection persistence
 

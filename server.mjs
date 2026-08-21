@@ -180,6 +180,16 @@ function openLocalUrl(port) {
   child.unref();
 }
 
+function printWelcome(url) {
+  console.log("");
+  console.log("Welcome to Codex Credit Stats");
+  console.log("Estimate your Codex weekly credit limit from actual usage.");
+  console.log(`Local dashboard: ${url}`);
+  console.log("The dashboard will try your saved ChatGPT connection first.");
+  console.log("Press Ctrl+C to stop the local service.");
+  console.log("");
+}
+
 const server = http.createServer(async (request, response) => {
   const requestUrl = new URL(request.url || "/", `http://${host}`);
 
@@ -250,7 +260,7 @@ server.on("error", (error) => {
 
 server.listen(port, host, () => {
   const url = `http://${host}:${port}/?token=${sessionToken}`;
-  console.log(`Codex Credit Stats running at ${url}`);
+  printWelcome(url);
   if (shouldOpen) void openLocalUrl(port);
   if (savedConnection) setTimeout(() => void runSync({ automatic: true }), 0);
 });

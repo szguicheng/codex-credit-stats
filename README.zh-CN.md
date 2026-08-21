@@ -12,7 +12,15 @@ Codex Credit Stats 是一个本地网页工具，用于根据你的实际使用�
 
 ## 安装
 
-需要 Node.js 20 或更高版本。
+**要求**：Node.js 20 或更高版本。
+
+**推荐**：
+
+```bash
+npx codex-credit-stats
+```
+
+也可以从源码启动：
 
 ```bash
 git clone https://github.com/szguicheng/codex-credit-stats.git
@@ -22,12 +30,6 @@ npm start
 ```
 
 工具会在浏览器中打开本地页面。首次使用时点击“连接 ChatGPT 并刷新”；如果尚未登录，请在打开的浏览器窗口中完成 ChatGPT 登录。成功连接后，之后每次启动都会先自动尝试重新连接。
-
-也可以直接运行已发布的 npm 包：
-
-```bash
-npx codex-credit-stats
-```
 
 ## 用途
 

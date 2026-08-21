@@ -12,7 +12,15 @@ Token 数やその他の間接的な指標だけでは、毎月の実際の上�
 
 ## インストール
 
-Node.js 20 以降が必要です。
+**要件**: Node.js 20 以降。
+
+**推奨**：
+
+```bash
+npx codex-credit-stats
+```
+
+ソースから起動することもできます：
 
 ```bash
 git clone https://github.com/szguicheng/codex-credit-stats.git
@@ -22,12 +30,6 @@ npm start
 ```
 
 ツールを起動すると、ブラウザにローカルページが開きます。初回は「Connect ChatGPT and refresh」をクリックし、必要に応じて表示されたブラウザ画面で ChatGPT にログインしてください。接続に成功した後は、次回以降の起動時に自動的に再接続を試みます。
-
-公開済みの npm パッケージは、次のコマンドでも起動できます。
-
-```bash
-npx codex-credit-stats
-```
 
 ## 用途
 

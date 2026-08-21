@@ -12,7 +12,15 @@ Token counts and other proxy metrics cannot show your actual monthly allowance. 
 
 ## Install
 
-Requirements: Node.js 20 or later.
+**Requirements**: Node.js 20 or later.
+
+**Recommend**：
+
+```bash
+npx codex-credit-stats
+```
+
+You can also start the published package directly with:
 
 ```bash
 git clone https://github.com/szguicheng/codex-credit-stats.git
@@ -23,11 +31,6 @@ npm start
 
 The tool opens a local page in your browser. On the first run, click **Connect ChatGPT and refresh**, then sign in to ChatGPT in the browser window if needed. After a successful connection, later starts try to reconnect automatically.
 
-You can also start the published package directly with:
-
-```bash
-npx codex-credit-stats
-```
 
 ## Purpose
 

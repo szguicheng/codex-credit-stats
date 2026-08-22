@@ -47,18 +47,37 @@ function findExternalBrowser() {
   return browserCandidates().find((candidate) => existsSync(candidate.executable)) || null;
 }
 
-function sleep(milliseconds) {
-  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+function createAbortError() {
+  const error = new Error("浏览器统计已取消。");
+  error.name = "AbortError";
+  return error;
 }
 
-async function connectToExternalBrowser(chromium, port, attempts = 40) {
+function sleep(milliseconds, signal) {
+  if (!signal) return new Promise((resolve) => setTimeout(resolve, milliseconds));
+  if (signal.aborted) return Promise.reject(createAbortError());
+  return new Promise((resolve, reject) => {
+    const onAbort = () => {
+      clearTimeout(timeout);
+      reject(createAbortError());
+    };
+    const timeout = setTimeout(() => {
+      signal.removeEventListener("abort", onAbort);
+      resolve();
+    }, milliseconds);
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
+async function connectToExternalBrowser(chromium, port, attempts = 40, signal) {
   let lastError = null;
   for (let attempt = 0; attempt < attempts; attempt += 1) {
+    if (signal?.aborted) throw createAbortError();
     try {
       return await chromium.connectOverCDP(`http://127.0.0.1:${port}`, { noDefaults: true });
     } catch (error) {
       lastError = error;
-      await sleep(500);
+      await sleep(500, signal);
     }
   }
   throw new Error(`无法连接外部浏览器调试通道：${lastError?.message || "timeout"}`);
@@ -197,9 +216,11 @@ export async function captureDailyUsageWithExternalBrowser({
   onStatus = () => {},
   dataDir = path.join(os.homedir(), ".codex-credit-stats"),
   profileDir = path.join(os.homedir(), ".codex-credit-stats", "external-browser-profile"),
-  interactive = true
+  interactive = true,
+  signal
 } = {}) {
   const { chromium } = await import("playwright");
+  if (signal?.aborted) throw createAbortError();
   mkdirSync(dataDir, { recursive: true });
   mkdirSync(profileDir, { recursive: true });
   const portFile = path.join(dataDir, "external-browser-port.json");
@@ -210,9 +231,10 @@ export async function captureDailyUsageWithExternalBrowser({
 
   if (port != null) {
     try {
-      connectedBrowser = await connectToExternalBrowser(chromium, port, 20);
+      connectedBrowser = await connectToExternalBrowser(chromium, port, 20, signal);
       onStatus({ phase: "auth", message: "正在复用已经登录的外部浏览器…" });
-    } catch {
+    } catch (error) {
+      if (signal?.aborted) throw error;
       connectedBrowser = null;
     }
   }
@@ -239,12 +261,12 @@ export async function captureDailyUsageWithExternalBrowser({
     ], { detached: true, stdio: "ignore", windowsHide: false });
     launchedProcess.unref();
     try {
-      connectedBrowser = await connectToExternalBrowser(chromium, port);
+      connectedBrowser = await connectToExternalBrowser(chromium, port, 40, signal);
       storeBrowserPort(portFile, port, launchedProcess.pid ?? null);
     } catch (launchError) {
       if (previousPort != null) {
         try {
-          connectedBrowser = await connectToExternalBrowser(chromium, previousPort, 10);
+          connectedBrowser = await connectToExternalBrowser(chromium, previousPort, 10, signal);
           if (launchedProcess?.pid && !launchedProcess.killed) launchedProcess.kill();
           launchedProcess = null;
           port = previousPort;
@@ -253,7 +275,14 @@ export async function captureDailyUsageWithExternalBrowser({
           // Preserve the original launch error below.
         }
       }
-      if (!connectedBrowser) throw launchError;
+      if (!connectedBrowser) {
+        try {
+          if (launchedProcess?.pid && !launchedProcess.killed) launchedProcess.kill();
+        } catch {
+          // The newly launched browser may already have exited.
+        }
+        throw launchError;
+      }
     }
   }
 
@@ -268,12 +297,20 @@ export async function captureDailyUsageWithExternalBrowser({
   let redirectTimer;
   let redirectInProgress = false;
   let loginStatus = null;
+  let abortHandler = null;
   let resolveCapture;
   let rejectCapture;
   const capturePromise = new Promise((resolve, reject) => {
     resolveCapture = resolve;
     rejectCapture = reject;
   });
+  abortHandler = () => {
+    if (settled) return;
+    settled = true;
+    rejectCapture(createAbortError());
+  };
+  if (signal?.aborted) abortHandler();
+  else signal?.addEventListener("abort", abortHandler, { once: true });
   const onResponse = async (response) => {
     if (settled || !response.url().includes(DAILY_USAGE_PATH) || response.status() !== 200) return;
     try {
@@ -325,6 +362,7 @@ export async function captureDailyUsageWithExternalBrowser({
 
   timeoutHandle = setTimeout(() => {
     if (!settled) {
+      settled = true;
       rejectCapture(new Error(interactive
         ? "等待外部浏览器登录或 analytics 响应超时。"
         : "无法使用已保存的 ChatGPT 连接；请点击连接按钮重新连接 ChatGPT。"));
@@ -351,6 +389,7 @@ export async function captureDailyUsageWithExternalBrowser({
     clearInterval(redirectTimer);
     context.off("response", onResponse);
     context.off("page", pageCreated);
+    signal?.removeEventListener("abort", abortHandler);
     await closeExternalBrowser({ browser: connectedBrowser, context, launchedProcess, storedBrowserPid });
   }
 }

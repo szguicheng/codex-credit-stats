@@ -55,6 +55,10 @@ const state = {
   }
 };
 const eventClients = new Set();
+let activeSyncAbortController = null;
+let activeSyncPromise = null;
+let stopping = false;
+let shutdownPromise = null;
 
 function jsonResponse(response, statusCode, value) {
   const body = JSON.stringify(value);
@@ -124,9 +128,11 @@ function serveStatic(response, pathname) {
 }
 
 async function runSync({ automatic = false } = {}) {
-  if (state.busy) return;
+  if (state.busy || stopping) return;
   state.busy = true;
   state.report = null;
+  const abortController = new AbortController();
+  activeSyncAbortController = abortController;
   publishStatus(
     automatic ? "正在尝试使用已保存的 ChatGPT 连接…" : "正在连接外部浏览器中的 ChatGPT analytics…",
     "auth",
@@ -137,6 +143,7 @@ async function runSync({ automatic = false } = {}) {
       dataDir: browserDataDir,
       profileDir: browserProfileDir,
       interactive: !automatic,
+      signal: abortController.signal,
       onStatus: ({ message, phase }) => publishStatus(message, phase || "auth", "busy")
     });
     publishStatus("正在读取本地 Codex session 用量快照…", "sessions", "busy");
@@ -158,11 +165,28 @@ async function runSync({ automatic = false } = {}) {
     publishStatus("统计完成。周期估计已更新。", "ready", "ready");
   } catch (error) {
     state.busy = false;
+    if (stopping || error?.name === "AbortError") return;
     const message = automatic
       ? "无法使用已保存的 ChatGPT 连接，请点击“连接 ChatGPT 并刷新”重新连接。"
       : error?.message || "统计失败，请重试。";
     publishStatus(message, "error", "error");
+  } finally {
+    if (activeSyncAbortController === abortController) activeSyncAbortController = null;
   }
+}
+
+function startSync(options) {
+  const promise = runSync(options);
+  activeSyncPromise = promise;
+  void promise.then(
+    () => {
+      if (activeSyncPromise === promise) activeSyncPromise = null;
+    },
+    () => {
+      if (activeSyncPromise === promise) activeSyncPromise = null;
+    }
+  );
+  return promise;
 }
 
 function openLocalUrl(port) {
@@ -186,7 +210,8 @@ function printWelcome(url) {
   console.log("Estimate your Codex weekly credit limit from actual usage.");
   console.log(`Local dashboard: ${url}`);
   console.log("The dashboard will try your saved ChatGPT connection first.");
-  console.log("Press Ctrl+C to stop the local service.");
+  console.log("Interactive foreground mode: keep this terminal open while using the dashboard.");
+  console.log("Closing the browser does not stop the service; press Ctrl+C here to stop it.");
   console.log("");
 }
 
@@ -223,7 +248,7 @@ const server = http.createServer(async (request, response) => {
       jsonResponse(response, 409, { error: "统计正在进行中。" });
       return;
     }
-    void runSync({ automatic: false });
+    void startSync({ automatic: false });
     jsonResponse(response, 202, { ok: true });
     return;
   }
@@ -249,9 +274,57 @@ const server = http.createServer(async (request, response) => {
 const port = Number(process.argv.find((value) => value.startsWith("--port="))?.split("=")[1] || defaultPort);
 const shouldOpen = !process.argv.includes("--no-open");
 
+function closeEventClients() {
+  for (const client of eventClients) {
+    try {
+      client.end();
+    } catch {
+      // The browser may already have closed the event stream.
+    }
+  }
+  eventClients.clear();
+}
+
+function closeHttpServer() {
+  return new Promise((resolve) => {
+    if (!server.listening) {
+      resolve();
+      return;
+    }
+    server.close(() => resolve());
+  });
+}
+
+function waitForSyncToStop() {
+  if (!activeSyncPromise) return Promise.resolve();
+  return Promise.race([
+    activeSyncPromise,
+    new Promise((resolve) => {
+      const timeout = setTimeout(resolve, 3000);
+      timeout.unref();
+    })
+  ]);
+}
+
+async function stopServer(signal) {
+  if (shutdownPromise) return shutdownPromise;
+  stopping = true;
+  shutdownPromise = (async () => {
+    console.log(`\n${signal} received. Stopping Codex Credit Stats.`);
+    activeSyncAbortController?.abort();
+    closeEventClients();
+    await Promise.all([closeHttpServer(), waitForSyncToStop()]);
+    console.log("Local service stopped.");
+    process.exit(0);
+  })();
+  return shutdownPromise;
+}
+
 server.on("error", (error) => {
   if (error.code === "EADDRINUSE") {
     console.error(`localhost 端口 ${port} 已被占用，请使用 --port=PORT 或 CODEX_CREDIT_PORT=PORT。`);
+    console.error("关闭浏览器不会停止本地服务；请回到启动上一实例的终端按 Ctrl+C。启动命令会一直保持前台运行。");
+    console.error(`也可以使用 npm start -- --port=${port + 1} 改用其他端口。`);
   } else {
     console.error(error.message);
   }
@@ -262,5 +335,8 @@ server.listen(port, host, () => {
   const url = `http://${host}:${port}/?token=${sessionToken}`;
   printWelcome(url);
   if (shouldOpen) void openLocalUrl(port);
-  if (savedConnection) setTimeout(() => void runSync({ automatic: true }), 0);
+  if (savedConnection) setTimeout(() => void startSync({ automatic: true }), 0);
 });
+
+process.once("SIGINT", () => void stopServer("SIGINT"));
+process.once("SIGTERM", () => void stopServer("SIGTERM"));

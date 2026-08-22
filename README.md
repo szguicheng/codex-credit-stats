@@ -29,6 +29,8 @@ npm install
 npm start
 ```
 
+`npm start` runs in interactive foreground mode in the same terminal. Keep that terminal open while using the dashboard; closing the browser does not stop the local service. Press `Ctrl+C` in the same terminal to stop it before starting it again. If a port conflict appears, return to the terminal running the previous instance and press `Ctrl+C`, or use `npm start -- --port=4318` to choose another port.
+
 The tool opens a local page in your browser. On the first run, click **Connect ChatGPT and refresh**, then sign in to ChatGPT in the browser window if needed. After a successful connection, later starts try to reconnect automatically.
 
 

@@ -329,10 +329,9 @@ export function estimateWeeklyCredits({ dailyRows, snapshots, timeZone }) {
   const cycles = buildCreditCycles(rows, selected, resolvedTimeZone);
   const currentCycle = cycles.at(-1) ?? null;
   const previousCycle = cycles.length > 1 ? cycles.at(-2) : null;
-  const referenceCycle = cycles
-    .slice(0, -1)
-    .reverse()
-    .find((cycle) => cycle.estimate?.impliedWeeklyCredits > 0) ?? null;
+  const referenceCycle = previousCycle?.estimate?.impliedWeeklyCredits > 0
+    ? previousCycle
+    : null;
   const referenceQuota = referenceCycle?.estimate?.impliedWeeklyCredits
     ?? currentCycle?.estimate?.impliedWeeklyCredits
     ?? null;

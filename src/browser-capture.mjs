@@ -55,7 +55,7 @@ async function connectToExternalBrowser(chromium, port, attempts = 40) {
   let lastError = null;
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     try {
-      return await chromium.connectOverCDP(`http://127.0.0.1:${port}`);
+      return await chromium.connectOverCDP(`http://127.0.0.1:${port}`, { noDefaults: true });
     } catch (error) {
       lastError = error;
       await sleep(500);
@@ -73,8 +73,17 @@ function readStoredBrowserPort(portFile) {
   }
 }
 
-function storeBrowserPort(portFile, port) {
-  writeFileSync(portFile, JSON.stringify({ port, updatedAt: new Date().toISOString() }, null, 2));
+function readStoredBrowserPid(portFile) {
+  try {
+    const value = JSON.parse(readFileSync(portFile, "utf8"));
+    return Number.isInteger(value.pid) ? value.pid : null;
+  } catch {
+    return null;
+  }
+}
+
+function storeBrowserPort(portFile, port, pid = null) {
+  writeFileSync(portFile, JSON.stringify({ port, pid, updatedAt: new Date().toISOString() }, null, 2));
 }
 
 function isChatGptHome(url) {
@@ -167,6 +176,23 @@ function openExternalUrl(url) {
   child.unref();
 }
 
+async function closeExternalBrowser({ browser, context, launchedProcess, storedBrowserPid }) {
+  if (context) {
+    const pages = context.pages();
+    await Promise.allSettled(pages.map((page) => page.close().catch(() => {})));
+  }
+  await browser?.close().catch(() => {});
+  const pid = launchedProcess?.pid ?? storedBrowserPid;
+  if (pid && (!launchedProcess || !launchedProcess.killed)) {
+    try {
+      if (launchedProcess) launchedProcess.kill();
+      else process.kill(pid);
+    } catch {
+      // The browser may already have exited after its last page closed.
+    }
+  }
+}
+
 export async function captureDailyUsageWithExternalBrowser({
   onStatus = () => {},
   dataDir = path.join(os.homedir(), ".codex-credit-stats"),
@@ -178,7 +204,9 @@ export async function captureDailyUsageWithExternalBrowser({
   mkdirSync(profileDir, { recursive: true });
   const portFile = path.join(dataDir, "external-browser-port.json");
   let connectedBrowser = null;
+  let launchedProcess = null;
   let port = readStoredBrowserPort(portFile);
+  const storedBrowserPid = readStoredBrowserPid(portFile);
 
   if (port != null) {
     try {
@@ -201,7 +229,7 @@ export async function captureDailyUsageWithExternalBrowser({
     const previousPort = port;
     port = 9222 + Math.floor(Math.random() * 500);
     onStatus({ phase: "auth", message: `正在打开外部浏览器 ${browser.name}…` });
-    const child = spawn(browser.executable, [
+    launchedProcess = spawn(browser.executable, [
       `--remote-debugging-port=${port}`,
       `--user-data-dir=${profileDir}`,
       "--no-first-run",
@@ -209,16 +237,18 @@ export async function captureDailyUsageWithExternalBrowser({
       "--new-window",
       ANALYTICS_URL
     ], { detached: true, stdio: "ignore", windowsHide: false });
-    child.unref();
+    launchedProcess.unref();
     try {
       connectedBrowser = await connectToExternalBrowser(chromium, port);
-      storeBrowserPort(portFile, port);
+      storeBrowserPort(portFile, port, launchedProcess.pid ?? null);
     } catch (launchError) {
       if (previousPort != null) {
         try {
           connectedBrowser = await connectToExternalBrowser(chromium, previousPort, 10);
+          if (launchedProcess?.pid && !launchedProcess.killed) launchedProcess.kill();
+          launchedProcess = null;
           port = previousPort;
-          storeBrowserPort(portFile, port);
+          storeBrowserPort(portFile, port, storedBrowserPid);
         } catch {
           // Preserve the original launch error below.
         }
@@ -229,7 +259,7 @@ export async function captureDailyUsageWithExternalBrowser({
 
   const context = connectedBrowser.contexts()[0];
   if (!context) {
-    await connectedBrowser.close().catch(() => {});
+    await closeExternalBrowser({ browser: connectedBrowser, launchedProcess, storedBrowserPid });
     throw new Error("外部浏览器没有可用的浏览器上下文。");
   }
 
@@ -321,6 +351,6 @@ export async function captureDailyUsageWithExternalBrowser({
     clearInterval(redirectTimer);
     context.off("response", onResponse);
     context.off("page", pageCreated);
-    await connectedBrowser.close().catch(() => {});
+    await closeExternalBrowser({ browser: connectedBrowser, context, launchedProcess, storedBrowserPid });
   }
 }

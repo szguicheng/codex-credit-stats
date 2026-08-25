@@ -114,6 +114,11 @@ input:focus { border-color: var(--blue); box-shadow: 0 0 0 3px var(--blue-soft);
 .metric-text { margin-top: 22px; font-size: 17px; line-height: 1.35; font-weight: 730; }
 .secondary-text { margin-top: 16px; font-size: 14px; color: #4e5c75; }
 .metric-foot { color: var(--muted); margin-top: 8px; font-size: 12px; }
+.window-summary { display: grid; gap: 3px; padding-top: 11px; margin-top: 12px; border-top: 1px solid var(--line); }
+.window-summary[hidden] { display: none; }
+.window-summary strong { color: #5364e9; font-size: 11px; }
+.window-summary span { color: var(--ink); font-size: 12px; font-weight: 720; }
+.window-summary small { color: var(--muted); font-size: 11px; }
 .progress-track { height: 8px; overflow: hidden; margin-top: 19px; border-radius: 999px; background: #edf0f6; }
 .progress-fill { width: 0; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #4c66f5, #8b70ef); transition: width .35s ease; }
 .source-badge { padding: 5px 8px; margin-top: 15px; color: #58667e; background: #f0f2f7; }

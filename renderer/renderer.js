@@ -298,6 +298,12 @@ function renderReport(report) {
     : `参考预估 ${number(currentWindow.referenceQuota, 0)} credits/week`;
   $("resetDate").textContent = report.local?.boundaryResetDate || "—";
   $("nextResetDate").textContent = localDateTime(report.local?.currentReset, timeZone);
+  const fiveHourWindow = report.local?.fiveHourWindow;
+  $("fiveHourWindow").hidden = !fiveHourWindow;
+  if (fiveHourWindow) {
+    $("fiveHourRemaining").textContent = `${percent(fiveHourWindow.remainingPercent, 3)} 剩余`;
+    $("fiveHourReset").textContent = `${localDateTime(fiveHourWindow.currentReset, timeZone)} 重置`;
+  }
   $("dailyCredits").textContent = number(report.daily?.creditsInAvailableRange ?? report.daily?.creditsInRequestedRange);
   $("dailyCoverage").textContent = `${report.daily?.availableFrom || "—"} → ${report.daily?.availableTo || "—"}`;
   $("sourceLabel").textContent = report.source === "authenticated-browser" ? "页面已认证" : "未读取";

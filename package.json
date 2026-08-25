@@ -1,13 +1,14 @@
 {
   "name": "codex-credit-stats",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "Estimate a weekly Codex credit limit from authenticated analytics responses and local Codex session rate-limit snapshots.",
   "type": "module",
   "main": "server.mjs",
   "scripts": {
     "cli": "node src/cli.mjs",
     "start": "node server.mjs",
-    "start:web": "node server.mjs"
+    "start:web": "node server.mjs",
+    "test": "node --test"
   },
   "bin": {
     "codex-credit-stats": "./server.mjs",

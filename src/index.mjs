@@ -13,6 +13,8 @@ export const PLAN_REFERENCES = [
 ];
 
 const WEEK_SECONDS = 7 * 24 * 60 * 60;
+const WEEK_WINDOW_MINUTES = 10080;
+const FIVE_HOUR_WINDOW_MINUTES = 300;
 const RESET_TOLERANCE_SECONDS = 10;
 
 export function expandHome(input) {
@@ -110,23 +112,33 @@ export async function readSessionSnapshots(sessionsDir) {
       }
 
       const payload = record.payload ?? {};
-      const primary = payload.rate_limits?.primary;
-      if (record.type !== "event_msg" || payload.type !== "token_count" || !primary) continue;
+      const rateLimits = payload.rate_limits;
+      if (record.type !== "event_msg" || payload.type !== "token_count" || !rateLimits) continue;
 
       const timestamp = record.timestamp ?? null;
-      const usedPercent = Number(primary.used_percent);
-      const windowMinutes = Number(primary.window_minutes);
-      const resetsAt = Number(primary.resets_at);
-      if (!timestamp || !Number.isFinite(usedPercent) || !Number.isFinite(windowMinutes) || !Number.isFinite(resetsAt)) continue;
+      if (!timestamp) continue;
 
-      snapshots.push({
-        file,
-        sessionId: sessionMeta?.id ?? null,
-        timestamp,
-        usedPercent,
-        windowMinutes,
-        resetsAt
-      });
+      for (const slot of ["primary", "secondary"]) {
+        const limit = rateLimits[slot];
+        if (!limit) continue;
+
+        const usedPercent = Number(limit.used_percent);
+        const windowMinutes = Number(limit.window_minutes);
+        const resetsAt = Number(limit.resets_at);
+        if (!Number.isFinite(usedPercent) || !Number.isFinite(windowMinutes) || !Number.isFinite(resetsAt)) continue;
+
+        snapshots.push({
+          file,
+          sessionId: sessionMeta?.id ?? null,
+          timestamp,
+          slot,
+          limitId: rateLimits.limit_id ?? null,
+          planType: rateLimits.plan_type ?? null,
+          usedPercent,
+          windowMinutes,
+          resetsAt
+        });
+      }
     }
 
     sessions.push({
@@ -166,9 +178,8 @@ function estimateWithRounding(credits, usedPercent, error = 0.5) {
   };
 }
 
-function selectWindowSnapshots(snapshots) {
-  const weekly = snapshots.filter((snapshot) => snapshot.windowMinutes === 10080);
-  const candidates = weekly.length > 0 ? weekly : snapshots;
+function selectWindowSnapshots(snapshots, windowMinutes) {
+  const candidates = snapshots.filter((snapshot) => snapshot.windowMinutes === windowMinutes);
   const latest = candidates.at(-1);
   if (!latest) return null;
 
@@ -180,7 +191,6 @@ function selectWindowSnapshots(snapshots) {
   const beforeCurrentReset = currentWindowStartMs == null
     ? null
     : candidates.filter((snapshot) => Date.parse(snapshot.timestamp) < currentWindowStartMs).at(-1) ?? null;
-  const windowMinutes = latest.windowMinutes;
   const currentWindowStartEpoch = currentReset - windowMinutes * 60;
   const previousWindowStart = currentWindowStartEpoch - windowMinutes * 60;
 
@@ -192,8 +202,24 @@ function selectWindowSnapshots(snapshots) {
     previousWindowStart,
     beforeCurrentReset,
     currentWindowLatest,
-    weeklySnapshotCount: candidates.length,
+    snapshotCount: candidates.length,
+    windowMinutes,
     snapshotCandidates: candidates
+  };
+}
+
+function summarizeWindow(selected) {
+  if (!selected?.currentWindowLatest) return null;
+  const latest = selected.currentWindowLatest;
+  return {
+    windowMinutes: selected.windowMinutes,
+    snapshotCount: selected.snapshotCount,
+    currentReset: selected.currentReset,
+    currentWindowStartEpoch: selected.currentWindowStartEpoch,
+    currentWindowStart: selected.currentWindowStart,
+    latest,
+    usedPercent: latest.usedPercent,
+    remainingPercent: Math.max(0, 100 - latest.usedPercent)
   };
 }
 
@@ -305,7 +331,9 @@ export function estimateWeeklyCredits({ dailyRows, snapshots, timeZone }) {
   const resolvedTimeZone = timeZone || Intl.DateTimeFormat().resolvedOptions().timeZone;
   const latestDate = rows.at(-1)?.date ?? todayIso(resolvedTimeZone);
   const dailyCreditsInAvailableRange = rows.reduce((sum, row) => sum + row.credits, 0);
-  const selected = selectWindowSnapshots(snapshots);
+  const selected = selectWindowSnapshots(snapshots, WEEK_WINDOW_MINUTES);
+  const fiveHourSelected = selectWindowSnapshots(snapshots, FIVE_HOUR_WINDOW_MINUTES);
+  const fiveHourWindow = summarizeWindow(fiveHourSelected);
 
   if (!selected?.currentWindowLatest) {
     return {
@@ -319,6 +347,14 @@ export function estimateWeeklyCredits({ dailyRows, snapshots, timeZone }) {
         creditsInRequestedRange: dailyCreditsInAvailableRange,
         rows
       },
+      local: {
+        filesRead: new Set(snapshots.map((snapshot) => snapshot.file)).size,
+        snapshotCount: snapshots.length,
+        weeklySnapshotCount: 0,
+        fiveHourSnapshotCount: fiveHourSelected?.snapshotCount ?? 0,
+        weeklyWindow: null,
+        fiveHourWindow
+      },
       cycles: [],
       estimates: { cycles: [] },
       message: "没有找到本地 Codex session 的 weekly rate-limit snapshot。"
@@ -329,9 +365,10 @@ export function estimateWeeklyCredits({ dailyRows, snapshots, timeZone }) {
   const cycles = buildCreditCycles(rows, selected, resolvedTimeZone);
   const currentCycle = cycles.at(-1) ?? null;
   const previousCycle = cycles.length > 1 ? cycles.at(-2) : null;
-  const referenceCycle = previousCycle?.estimate?.impliedWeeklyCredits > 0
-    ? previousCycle
-    : null;
+  const referenceCycle = cycles
+    .slice(0, -1)
+    .reverse()
+    .find((cycle) => cycle.estimate?.impliedWeeklyCredits > 0) ?? null;
   const referenceQuota = referenceCycle?.estimate?.impliedWeeklyCredits
     ?? currentCycle?.estimate?.impliedWeeklyCredits
     ?? null;
@@ -366,7 +403,10 @@ export function estimateWeeklyCredits({ dailyRows, snapshots, timeZone }) {
     local: {
       filesRead: new Set(snapshots.map((snapshot) => snapshot.file)).size,
       snapshotCount: snapshots.length,
-      weeklySnapshotCount: selected.weeklySnapshotCount,
+      weeklySnapshotCount: selected.snapshotCount,
+      fiveHourSnapshotCount: fiveHourSelected?.snapshotCount ?? 0,
+      weeklyWindow: summarizeWindow(selected),
+      fiveHourWindow,
       currentReset: selected.currentReset,
       currentWindowStart: selected.currentWindowStart,
       currentWindowStartEpoch: selected.currentWindowStartEpoch,

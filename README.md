@@ -1,5 +1,9 @@
 # Codex Credit Stats
 
+[![npm version](https://img.shields.io/npm/v/codex-credit-stats?style=for-the-badge&logo=npm&color=CB3837)](https://www.npmjs.com/package/codex-credit-stats)
+[![npm monthly downloads](https://img.shields.io/npm/dm/codex-credit-stats?style=for-the-badge&logo=npm&label=monthly%20downloads&color=646CFF)](https://www.npmjs.com/package/codex-credit-stats)
+[![npm total downloads](https://img.shields.io/npm/dt/codex-credit-stats?style=for-the-badge&logo=npm&label=total%20downloads&color=8B5CF6)](https://www.npmjs.com/package/codex-credit-stats)
+
 [English](README.md) · [简体中文](README.zh-CN.md) · [日本語](README.ja.md)
 
 ![Codex Credit Stats dashboard preview](docs/dashboard-preview.jpg)
@@ -66,3 +70,9 @@ The tool reads two categories of personal information:
 2. **Local Codex session usage** — the usage percentage and reset time recorded in your local Codex session files, normally under `~/.codex/sessions`.
 
 These two sources are used to calculate the estimated weekly limit and current remaining credits.
+
+## Download trend
+
+[![npm downloads trend](https://www.npm.bet/svg?q=codex-credit-stats&timeRange=last-year&grouping=week)](https://www.npm.bet/?q=codex-credit-stats&timeRange=last-year&grouping=week)
+
+[View the package on npm-compare](https://npm-compare.com/codex-credit-stats#timeRange=THREE_YEARS)

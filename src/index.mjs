@@ -223,13 +223,6 @@ function summarizeWindow(selected) {
   };
 }
 
-function snapshotAtOrBefore(snapshots, epochSeconds) {
-  const boundaryMs = epochSeconds * 1000;
-  return snapshots
-    .filter((snapshot) => Date.parse(snapshot.timestamp) <= boundaryMs)
-    .at(-1) ?? null;
-}
-
 function dateDifferenceInclusive(fromDate, toDate) {
   if (!fromDate || !toDate || fromDate > toDate) return 0;
   const from = Date.parse(`${fromDate}T12:00:00Z`);
@@ -237,99 +230,213 @@ function dateDifferenceInclusive(fromDate, toDate) {
   return Math.round((to - from) / 86400000) + 1;
 }
 
-function sumDailyCreditsRange(rows, fromDate, toDateExclusive) {
-  return rows
-    .filter((row) => row.date >= fromDate && row.date < toDateExclusive)
-    .reduce((sum, row) => sum + row.credits, 0);
+function timeZoneOffsetMilliseconds(value, timeZone) {
+  const date = new Date(value);
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23"
+  }).formatToParts(date);
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  const representedAsUtc = Date.UTC(
+    Number(values.year),
+    Number(values.month) - 1,
+    Number(values.day),
+    Number(values.hour),
+    Number(values.minute),
+    Number(values.second)
+  );
+  return representedAsUtc - date.getTime();
 }
 
-function makeCycle({
-  rows,
-  snapshots,
-  selected,
-  indexFromLatest,
-  fromDate,
-  toDate,
-  toDateExclusive,
-  endEpoch,
-  current = false
-}) {
-  const credits = current
-    ? sumDailyCredits(rows, fromDate, toDate)
-    : sumDailyCreditsRange(rows, fromDate, toDateExclusive);
-  const snapshot = current ? selected.currentWindowLatest : snapshotAtOrBefore(snapshots, endEpoch);
-  const usedPercent = snapshot?.usedPercent ?? null;
-  const estimate = estimateWithRounding(credits, usedPercent);
+function dayStartEpoch(isoDate, timeZone) {
+  const utcMidnight = Date.parse(`${isoDate}T00:00:00Z`);
+  let epoch = utcMidnight - timeZoneOffsetMilliseconds(utcMidnight, timeZone);
+  epoch = utcMidnight - timeZoneOffsetMilliseconds(epoch, timeZone);
+  return epoch / 1000;
+}
+
+function integrateDailyCredits(rows, startEpoch, endEpoch, timeZone) {
+  let prorated = 0;
+  let fullDays = 0;
+  let overlappingDays = 0;
+
+  for (const row of rows) {
+    const dayStart = dayStartEpoch(row.date, timeZone);
+    const dayEnd = dayStartEpoch(addDays(row.date, 1), timeZone);
+    const overlap = Math.max(0, Math.min(dayEnd, endEpoch) - Math.max(dayStart, startEpoch));
+    if (overlap <= 0) continue;
+
+    prorated += row.credits * (overlap / (dayEnd - dayStart));
+    overlappingDays += row.credits;
+    if (startEpoch <= dayStart && endEpoch >= dayEnd) fullDays += row.credits;
+  }
 
   return {
-    id: current ? "current" : `cycle-${indexFromLatest}`,
-    indexFromLatest,
-    kind: current ? "current" : "seven-day",
-    fromDate,
-    toDate,
-    durationDays: dateDifferenceInclusive(fromDate, toDate),
-    credits,
-    usedPercent,
-    estimate,
-    snapshotTimestamp: snapshot?.timestamp ?? null,
-    snapshotResetsAt: snapshot?.resetsAt ?? null,
-    hasDailyData: credits > 0,
-    label: current ? `${fromDate} → ${toDate} · 当前` : `${fromDate} → ${toDate}`
+    prorated,
+    lower: fullDays,
+    upper: overlappingDays
   };
 }
 
-function buildCreditCycles(rows, selected, timeZone) {
-  if (!selected?.currentWindowLatest || selected.currentWindowStartEpoch == null || !rows.length) return [];
+function clusterRateLimitCohorts(snapshots, planType) {
+  const positive = snapshots
+    .filter((snapshot) => snapshot.usedPercent > 0 && (!planType || !snapshot.planType || snapshot.planType === planType))
+    .sort((a, b) => a.resetsAt - b.resetsAt || a.timestamp.localeCompare(b.timestamp));
+  const groups = [];
 
-  const latestDate = rows.at(-1).date;
-  const oldestDate = rows[0].date;
-  const anchorEpoch = selected.currentWindowStartEpoch;
-  const anchorDate = dateInTimeZone(anchorEpoch * 1000, timeZone);
-  const current = makeCycle({
-    rows,
-    snapshots: selected.snapshotCandidates,
-    selected,
-    indexFromLatest: 0,
-    fromDate: anchorDate,
-    toDate: latestDate >= anchorDate ? latestDate : anchorDate,
-    endEpoch: Date.now() / 1000,
-    current: true
-  });
-
-  const historical = [];
-  for (let index = 1; index <= 52; index += 1) {
-    const endEpoch = anchorEpoch - (index - 1) * WEEK_SECONDS;
-    const startEpoch = endEpoch - WEEK_SECONDS;
-    const fromDate = dateInTimeZone(startEpoch * 1000, timeZone);
-    const toDateExclusive = dateInTimeZone(endEpoch * 1000, timeZone);
-    const toDate = addDays(toDateExclusive, -1);
-    const hasRows = rows.some((row) => row.date >= fromDate && row.date < toDateExclusive);
-    const snapshot = snapshotAtOrBefore(selected.snapshotCandidates, endEpoch);
-
-    if (!hasRows && !snapshot) break;
-    if (toDate < oldestDate && !hasRows) break;
-
-    historical.push(makeCycle({
-      rows,
-      snapshots: selected.snapshotCandidates,
-      selected,
-      indexFromLatest: index,
-      fromDate,
-      toDate,
-      toDateExclusive,
-      endEpoch
-    }));
-
-    if (fromDate <= oldestDate && !hasRows) break;
+  for (const snapshot of positive) {
+    let group = groups.at(-1);
+    if (!group || snapshot.resetsAt - group.maxReset > RESET_TOLERANCE_SECONDS) {
+      group = { minReset: snapshot.resetsAt, maxReset: snapshot.resetsAt, snapshots: [] };
+      groups.push(group);
+    }
+    group.maxReset = Math.max(group.maxReset, snapshot.resetsAt);
+    group.snapshots.push(snapshot);
   }
 
-  return [...historical.reverse(), current].filter((cycle) => cycle.hasDailyData || cycle.estimate);
+  return groups.map((group) => {
+    let peak = group.snapshots[0];
+    for (const snapshot of group.snapshots) {
+      if (snapshot.usedPercent > peak.usedPercent || (
+        snapshot.usedPercent === peak.usedPercent && snapshot.timestamp > peak.timestamp
+      )) peak = snapshot;
+    }
+    return {
+      resetEpoch: Math.round((group.minReset + group.maxReset) / 2),
+      minReset: group.minReset,
+      maxReset: group.maxReset,
+      usedPercent: peak.usedPercent,
+      observation: peak,
+      snapshotCount: group.snapshots.length
+    };
+  });
+}
+
+function makeHistoricalCohortCycle({ cohort, rows, timeZone }) {
+  const startEpoch = cohort.resetEpoch - WEEK_SECONDS;
+  const observationEpoch = Math.min(Date.parse(cohort.observation.timestamp) / 1000, cohort.resetEpoch);
+  const fromDate = dateInTimeZone(startEpoch * 1000, timeZone);
+  const toDate = dateInTimeZone(observationEpoch * 1000, timeZone);
+  const coverage = integrateDailyCredits(rows, startEpoch, observationEpoch, timeZone);
+  const estimate = estimateWithRounding(coverage.prorated, cohort.usedPercent);
+
+  return {
+    id: `cohort-${cohort.resetEpoch}`,
+    kind: "observed-window",
+    fromDate,
+    toDate,
+    durationDays: dateDifferenceInclusive(fromDate, toDate),
+    credits: coverage.prorated,
+    creditsRange: { lower: coverage.lower, upper: coverage.upper },
+    creditMethod: "prorated-boundary-days",
+    usedPercent: cohort.usedPercent,
+    estimate,
+    snapshotTimestamp: cohort.observation.timestamp,
+    snapshotResetsAt: cohort.resetEpoch,
+    snapshotCount: cohort.snapshotCount,
+    hasDailyData: coverage.upper > 0,
+    label: `${fromDate} → ${toDate}`
+  };
+}
+
+function weightedReferenceEstimate(cycles) {
+  if (!cycles.length) return null;
+  const sorted = [...cycles].sort((a, b) => a.estimate.impliedWeeklyCredits - b.estimate.impliedWeeklyCredits);
+  const median = sorted[Math.floor(sorted.length / 2)].estimate.impliedWeeklyCredits;
+  const aligned = sorted.filter((cycle) => {
+    const value = cycle.estimate.impliedWeeklyCredits;
+    return value >= median * 0.5 && value <= median * 2;
+  });
+  const totalWeight = aligned.reduce((sum, cycle) => sum + cycle.usedPercent, 0);
+  if (!(totalWeight > 0)) return null;
+  const weighted = (selector) => aligned.reduce((sum, cycle) => sum + selector(cycle) * cycle.usedPercent, 0) / totalWeight;
+
+  return {
+    impliedWeeklyCredits: weighted((cycle) => cycle.estimate.impliedWeeklyCredits),
+    roundingRange: {
+      lower: weighted((cycle) => cycle.estimate.roundingRange.lower),
+      upper: weighted((cycle) => cycle.estimate.roundingRange.upper)
+    },
+    cohortCount: aligned.length,
+    usedPercentWeight: totalWeight,
+    cycleIds: aligned.map((cycle) => cycle.id)
+  };
+}
+
+function buildAlignedCreditCycles(rows, selected, timeZone) {
+  if (!selected?.currentWindowLatest || selected.currentWindowStartEpoch == null || !rows.length) {
+    return { cycles: [], reference: null, currentCycle: null, historicalCycles: [] };
+  }
+
+  const oldestDate = rows[0].date;
+  const latestDate = rows.at(-1).date;
+  const current = selected.currentWindowLatest;
+  const currentPlan = current.planType ?? null;
+  const cohorts = clusterRateLimitCohorts(selected.snapshotCandidates, currentPlan);
+  const historicalCycles = cohorts
+    .filter((cohort) => Math.abs(cohort.resetEpoch - selected.currentReset) > RESET_TOLERANCE_SECONDS)
+    .map((cohort) => makeHistoricalCohortCycle({ cohort, rows, timeZone }))
+    .filter((cycle) => cycle.fromDate >= oldestDate && cycle.toDate <= latestDate && cycle.estimate);
+
+  const reliable = historicalCycles
+    .filter((cycle) => cycle.usedPercent >= 5)
+    .slice(-6);
+  const reference = weightedReferenceEstimate(reliable);
+  const visibleHistorical = historicalCycles
+    .filter((cycle) => cycle.usedPercent >= 3)
+    .filter((cycle) => {
+      if (!reference) return true;
+      const value = cycle.estimate.impliedWeeklyCredits;
+      return value >= reference.impliedWeeklyCredits * 0.4 && value <= reference.impliedWeeklyCredits * 2.5;
+    })
+    .slice(-7);
+
+  const currentFromDate = dateInTimeZone(selected.currentWindowStartEpoch * 1000, timeZone);
+  const currentToDate = latestDate >= currentFromDate ? latestDate : currentFromDate;
+  const currentCredits = current.usedPercent > 0
+    ? sumDailyCredits(rows, currentFromDate, currentToDate)
+    : 0;
+  const currentObservationEpoch = Date.parse(current.timestamp) / 1000;
+  const currentCoverage = integrateDailyCredits(
+    rows,
+    selected.currentWindowStartEpoch,
+    currentObservationEpoch,
+    timeZone
+  );
+  const currentCycle = {
+    id: "current",
+    kind: "current",
+    fromDate: currentFromDate,
+    toDate: currentToDate,
+    durationDays: dateDifferenceInclusive(currentFromDate, currentToDate),
+    credits: currentCredits,
+    creditsRange: { lower: currentCoverage.lower, upper: currentCoverage.upper },
+    alignedCredits: currentCoverage.prorated,
+    creditMethod: "daily-upper-bound",
+    usedPercent: current.usedPercent,
+    estimate: estimateWithRounding(currentCredits, current.usedPercent),
+    snapshotTimestamp: current.timestamp,
+    snapshotResetsAt: current.resetsAt,
+    hasDailyData: currentCredits > 0,
+    label: `${currentFromDate} → ${currentToDate} · 当前`
+  };
+  const cycles = [...visibleHistorical, currentCycle];
+  cycles.forEach((cycle, index) => {
+    cycle.indexFromLatest = cycles.length - index - 1;
+  });
+
+  return { cycles, reference, currentCycle, historicalCycles };
 }
 
 export function estimateWeeklyCredits({ dailyRows, snapshots, timeZone }) {
   const rows = parseDailyUsage(dailyRows);
   const resolvedTimeZone = timeZone || Intl.DateTimeFormat().resolvedOptions().timeZone;
-  const latestDate = rows.at(-1)?.date ?? todayIso(resolvedTimeZone);
   const dailyCreditsInAvailableRange = rows.reduce((sum, row) => sum + row.credits, 0);
   const selected = selectWindowSnapshots(snapshots, WEEK_WINDOW_MINUTES);
   const fiveHourSelected = selectWindowSnapshots(snapshots, FIVE_HOUR_WINDOW_MINUTES);
@@ -362,14 +469,11 @@ export function estimateWeeklyCredits({ dailyRows, snapshots, timeZone }) {
   }
 
   const current = selected.currentWindowLatest;
-  const cycles = buildCreditCycles(rows, selected, resolvedTimeZone);
-  const currentCycle = cycles.at(-1) ?? null;
-  const previousCycle = cycles.length > 1 ? cycles.at(-2) : null;
-  const referenceCycle = cycles
-    .slice(0, -1)
-    .reverse()
-    .find((cycle) => cycle.estimate?.impliedWeeklyCredits > 0) ?? null;
-  const referenceQuota = referenceCycle?.estimate?.impliedWeeklyCredits
+  const aligned = buildAlignedCreditCycles(rows, selected, resolvedTimeZone);
+  const { cycles, currentCycle, historicalCycles } = aligned;
+  const previousCycle = historicalCycles.at(-1) ?? null;
+  const referenceEstimate = aligned.reference ?? currentCycle?.estimate ?? null;
+  const referenceQuota = referenceEstimate?.impliedWeeklyCredits
     ?? currentCycle?.estimate?.impliedWeeklyCredits
     ?? null;
   const currentWindowCredits = currentCycle?.credits ?? null;
@@ -390,7 +494,7 @@ export function estimateWeeklyCredits({ dailyRows, snapshots, timeZone }) {
     : dateInTimeZone(selected.previousWindowStart * 1000, resolvedTimeZone);
 
   return {
-    method: "rolling-seven-day-cycles",
+    method: "aligned-rate-limit-cohorts",
     timezone: resolvedTimeZone,
     planReferences: PLAN_REFERENCES,
     daily: {
@@ -420,24 +524,28 @@ export function estimateWeeklyCredits({ dailyRows, snapshots, timeZone }) {
     cycles,
     estimates: {
       cycles,
-      latest: currentCycle?.estimate ?? previousCycle?.estimate ?? null,
+      latest: referenceEstimate,
+      reference: referenceEstimate,
+      referenceWindowCount: aligned.reference?.cohortCount ?? 0,
       previousWindowApprox: previousCycle?.estimate ?? null,
       currentWindowApprox: currentCycle?.estimate ?? null,
       currentWindow: {
         usedCredits: currentWindowCredits,
         referenceQuota,
-        referenceCycle: referenceCycle?.label ?? null,
+        referenceCycle: aligned.reference
+          ? `${aligned.reference.cohortCount} 个已对齐历史窗口`
+          : null,
         usedPercent: currentWindowUsedPercent,
         remainingPercent: currentWindowRemainingPercent,
         remainingCredits: currentWindowRemainingCredits,
-        source: referenceCycle ? "latest-completed-cycle" : "local-snapshot-fallback"
+        source: aligned.reference ? "aligned-historical-cohorts" : "current-cohort-fallback"
       },
       naiveRequestedRange: estimateWithRounding(dailyCreditsInAvailableRange, current.usedPercent)
     },
     notes: [
-      "当前周期从最近一次额度更新到网页数据最新日期；历史周期从该更新点向前按 7 天切分。",
-      "daily-workspace-usage-counts 只有日粒度，因此更新日的 credits 不能精确拆分到小时。",
-      "当前窗口比例优先使用当前窗口 credits ÷ 最近完成周期的预估周限额；没有历史完整周期时才回退到本地 used_percent。"
+      "历史估计按真实 resets_at cohort 对齐，不再从最新重置点机械向前切分固定自然日周期。",
+      "历史窗口的起止边界日按时间占比折算；daily-workspace-usage-counts 只有日粒度，因此结果仍是估计值。",
+      "当前窗口比例使用当前窗口日用量 ÷ 多个可靠历史窗口的加权周限额；没有可靠历史窗口时回退到当前 cohort。"
     ]
   };
 }

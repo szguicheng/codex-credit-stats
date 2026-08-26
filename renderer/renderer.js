@@ -269,7 +269,7 @@ function renderReport(report) {
   state.report = report;
   const cycles = report.cycles || report.estimates?.cycles || [];
   const latestCycle = cycles.at(-1);
-  const latestEstimate = report.estimates?.latest || latestCycle?.estimate;
+  const latestEstimate = report.estimates?.reference || report.estimates?.latest || latestCycle?.estimate;
   const current = report.local?.currentWindowLatest;
   const currentWindow = report.estimates?.currentWindow;
   const timeZone = report.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -285,9 +285,11 @@ function renderReport(report) {
       : currentEstimate.impliedWeeklyCredits * (remaining / 100));
 
   $("weeklyLimit").textContent = number(latestEstimate?.impliedWeeklyCredits, 0);
-  $("estimateCaption").textContent = latestCycle
-    ? `${latestCycle.fromDate} → ${latestCycle.toDate}${latestCycle.kind === "current" ? " · 当前周期" : ""}`
-    : "尚未形成可估算周期";
+  $("estimateCaption").textContent = report.estimates?.referenceWindowCount
+    ? `基于 ${report.estimates.referenceWindowCount} 个已对齐历史窗口`
+    : latestCycle
+      ? `${latestCycle.fromDate} → ${latestCycle.toDate}${latestCycle.kind === "current" ? " · 当前周期" : ""}`
+      : "尚未形成可估算周期";
   $("confidenceRange").textContent = range ? `${number(range.lower, 0)} – ${number(range.upper, 0)}` : "—";
   $("currentRemaining").textContent = percent(remaining, 3);
   $("usageProgress").style.width = `${Math.min(100, Math.max(0, Number(usedPercent) || 0))}%`;

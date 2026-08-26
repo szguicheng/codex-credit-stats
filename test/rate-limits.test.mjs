@@ -67,3 +67,45 @@ test("reads old weekly-primary and new five-hour-primary plus weekly-secondary s
   assert.equal(report.local.fiveHourWindow.remainingPercent, 96);
   assert.equal(report.local.fiveHourWindow.currentReset, 1787685764);
 });
+
+test("aligns historical credits with their actual reset cohort", () => {
+  const historicalReset = Date.parse("2026-08-08T00:00:00+08:00") / 1000;
+  const currentReset = Date.parse("2026-08-16T00:00:00+08:00") / 1000;
+  const snapshots = [
+    {
+      file: "historical.jsonl",
+      timestamp: "2026-08-07T15:59:00.000Z",
+      slot: "primary",
+      planType: "pro",
+      usedPercent: 20,
+      windowMinutes: 10080,
+      resetsAt: historicalReset
+    },
+    {
+      file: "current.jsonl",
+      timestamp: "2026-08-09T15:00:00.000Z",
+      slot: "primary",
+      planType: "pro",
+      usedPercent: 2,
+      windowMinutes: 10080,
+      resetsAt: currentReset
+    }
+  ];
+  const dailyRows = [
+    ...Array.from({ length: 7 }, (_, index) => ({
+      date: `2026-08-${String(index + 1).padStart(2, "0")}`,
+      totals: { credits: 1000 }
+    })),
+    { date: "2026-08-09", totals: { credits: 700 } }
+  ];
+
+  const report = estimateWeeklyCredits({ dailyRows, snapshots, timeZone: "Asia/Shanghai" });
+
+  assert.equal(report.method, "aligned-rate-limit-cohorts");
+  assert.equal(report.estimates.referenceWindowCount, 1);
+  assert.ok(Math.abs(report.estimates.reference.impliedWeeklyCredits - 35000) < 10);
+  assert.equal(report.estimates.currentWindow.usedCredits, 700);
+  assert.ok(Math.abs(report.estimates.currentWindow.usedPercent - 2) < 0.01);
+  assert.equal(report.cycles[0].fromDate, "2026-08-01");
+  assert.equal(report.cycles[0].toDate, "2026-08-07");
+});

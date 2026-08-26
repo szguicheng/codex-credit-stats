@@ -76,11 +76,10 @@ function renderCycleChart(cycles, references = [], dailyRows = []) {
   const plotHeight = height - margin.top - margin.bottom;
   svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
 
-  const referenceValues = references.map((reference) => Number(reference.credits)).filter((value) => value > 0);
   const values = points.map((point) => Number(point.estimate.impliedWeeklyCredits));
-  const allValues = [...values, ...referenceValues];
-  let minValue = allValues.length ? Math.min(...allValues) : 0;
-  let maxValue = allValues.length ? Math.max(...allValues) : 1;
+  const targetTickCount = 5;
+  let minValue = values.length ? Math.min(...values) : 0;
+  let maxValue = values.length ? Math.max(...values) : 1;
   if (minValue === maxValue) {
     minValue = Math.max(0, minValue * 0.8);
     maxValue *= 1.2;
@@ -89,6 +88,15 @@ function renderCycleChart(cycles, references = [], dailyRows = []) {
     minValue = Math.max(0, minValue - padding);
     maxValue += padding;
   }
+
+  const roughStep = (maxValue - minValue) / targetTickCount;
+  const magnitude = 10 ** Math.floor(Math.log10(Math.max(roughStep, Number.EPSILON)));
+  const normalizedStep = roughStep / magnitude;
+  const niceMultiplier = normalizedStep <= 1 ? 1 : normalizedStep <= 2 ? 2 : normalizedStep <= 5 ? 5 : 10;
+  const niceStep = niceMultiplier * magnitude;
+  minValue = Math.max(0, Math.floor(minValue / niceStep) * niceStep);
+  maxValue = Math.ceil(maxValue / niceStep) * niceStep;
+  const tickCount = Math.max(3, Math.min(7, Math.round((maxValue - minValue) / niceStep)));
 
   const dateEpoch = (iso) => Date.parse(`${iso}T12:00:00Z`);
   const dateEpochs = [
@@ -107,7 +115,6 @@ function renderCycleChart(cycles, references = [], dailyRows = []) {
   const dailyMagnitude = 10 ** Math.floor(Math.log10(dailyMaxValue));
   const dailyMax = Math.ceil((dailyMaxValue * 1.1) / dailyMagnitude) * dailyMagnitude;
   const yRight = (value) => margin.top + (1 - value / dailyMax) * plotHeight;
-  const tickCount = 5;
   const grid = svgElement("g", { class: "cycle-grid" });
   for (let index = 0; index <= tickCount; index += 1) {
     const value = minValue + ((maxValue - minValue) * index) / tickCount;

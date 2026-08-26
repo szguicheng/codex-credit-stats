@@ -17,22 +17,29 @@
             <h1>Codex Credit Stats</h1>
           </div>
         </div>
+        <button id="refreshButton" class="button primary topbar-refresh">连接 ChatGPT 并刷新</button>
         <div id="connectionPill" class="connection-pill idle">未连接</div>
       </header>
 
       <main>
-        <section class="control-card card">
-          <div class="section-heading">
-            <div>
-              <div class="eyebrow">LIVE SYNC</div>
-              <h2>自动刷新统计</h2>
-            </div>
-            <button id="refreshButton" class="button primary">连接 ChatGPT 并刷新</button>
-          </div>
-          <div class="control-hint">自动读取 analytics 日汇总和本地 session 快照，以最近一次额度更新为锚点切分周期。</div>
-        </section>
+        <div id="statusBanner" class="status-banner idle" role="status" aria-live="polite">准备就绪。点击刷新后对齐额度窗口。</div>
 
-        <div id="statusBanner" class="status-banner idle" role="status" aria-live="polite">准备就绪。点击刷新后自动切分周期。</div>
+        <section class="card cycle-card">
+          <div class="section-heading compact">
+            <div>
+              <div class="eyebrow">CREDIT OVERVIEW</div>
+              <h2>周限额估计与每日 credits</h2>
+            </div>
+            <div id="cycleSummary" class="chart-total">—</div>
+          </div>
+          <div class="chart-subtitle">左轴显示周额度估计与套餐参考线，右轴显示每日 credits；横轴按真实日期对齐。</div>
+          <div class="cycle-chart-wrap">
+            <svg id="cycleChart" class="cycle-chart" role="img" aria-label="周限额估计与每日 credits 双轴图" viewBox="0 0 960 270" preserveAspectRatio="none"></svg>
+            <div id="cycleChartEmpty" class="empty-state">完成一次刷新后显示综合统计图。</div>
+          </div>
+          <div id="cycleLegend" class="cycle-legend"></div>
+          <div id="cycleDetails" class="cycle-details" aria-live="polite"></div>
+        </section>
 
         <section class="hero-grid">
           <article class="hero-card card">
@@ -72,51 +79,6 @@
             <div class="metric-number"><span id="dailyCredits">—</span><small> credits</small></div>
             <div id="dailyCoverage" class="metric-foot">—</div>
             <div id="sourceLabel" class="source-badge">未读取</div>
-          </article>
-        </section>
-
-        <section class="card cycle-card">
-          <div class="section-heading compact">
-            <div>
-              <div class="eyebrow">CYCLE ESTIMATES</div>
-              <h2>周期周限额估计</h2>
-            </div>
-            <div id="cycleSummary" class="chart-total">—</div>
-          </div>
-          <div class="chart-subtitle">横轴从旧到新；历史点按真实重置窗口对齐并折算边界日，最右侧为当前额度窗口。</div>
-          <div class="cycle-chart-wrap">
-            <svg id="cycleChart" class="cycle-chart" role="img" aria-label="周期周限额估计散点连线图" viewBox="0 0 960 360" preserveAspectRatio="none"></svg>
-            <div id="cycleChartEmpty" class="empty-state">完成一次刷新后显示周期估计。</div>
-          </div>
-          <div id="cycleLegend" class="cycle-legend"></div>
-          <div id="cycleDetails" class="cycle-details" aria-live="polite"></div>
-        </section>
-
-        <section class="content-grid">
-          <article class="card chart-card">
-            <div class="section-heading compact">
-              <div>
-                <div class="eyebrow">SERVER SOURCE</div>
-                <h2>每日 credits 使用量</h2>
-              </div>
-              <div id="chartTotal" class="chart-total">—</div>
-            </div>
-            <div id="dailyChart" class="daily-chart">
-              <div class="empty-state">完成一次刷新后显示每日用量。</div>
-            </div>
-          </article>
-
-          <article class="card plan-card">
-            <div class="section-heading compact">
-              <div>
-                <div class="eyebrow">PLAN REFERENCE</div>
-                <h2>套餐参考额度</h2>
-              </div>
-              <div class="mini-dot"></div>
-            </div>
-            <div id="planStatus" class="plan-status">未从 analytics 识别具体套餐，以下为静态参考值。</div>
-            <div id="planRows" class="plan-rows"></div>
-            <div class="diagnostic-note">用最近周期估计与识别到的套餐参考量对比；识别不到套餐时仍保留三档静态参考。</div>
           </article>
         </section>
       </main>

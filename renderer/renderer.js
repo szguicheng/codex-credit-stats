@@ -53,44 +53,13 @@ function svgElement(name, attributes = {}) {
   return element;
 }
 
-function renderDailyChart(rows) {
-  const chart = $("dailyChart");
-  chart.textContent = "";
-  if (!rows?.length) {
-    const empty = document.createElement("div");
-    empty.className = "empty-state";
-    empty.textContent = "当前没有服务端日用量记录。";
-    chart.append(empty);
-    return;
-  }
-
-  const max = Math.max(...rows.map((row) => Number(row.credits) || 0), 1);
-  for (const row of rows) {
-    const wrapper = document.createElement("div");
-    wrapper.className = "bar-row";
-    const date = document.createElement("span");
-    date.className = "bar-date";
-    date.textContent = shortDate(row.date);
-    const track = document.createElement("div");
-    track.className = "bar-track";
-    const fill = document.createElement("div");
-    fill.className = "bar-fill";
-    fill.style.width = `${Math.max(2, ((Number(row.credits) || 0) / max) * 100)}%`;
-    track.append(fill);
-    const value = document.createElement("span");
-    value.className = "bar-value";
-    value.textContent = number(row.credits, 0);
-    wrapper.append(date, track, value);
-    chart.append(wrapper);
-  }
-}
-
-function renderCycleChart(cycles, references = []) {
+function renderCycleChart(cycles, references = [], dailyRows = []) {
   const svg = $("cycleChart");
   const empty = $("cycleChartEmpty");
   const points = (cycles || []).filter((cycle) => cycle.estimate?.impliedWeeklyCredits > 0);
+  const daily = (dailyRows || []).filter((row) => /^\d{4}-\d{2}-\d{2}$/.test(row.date) && Number(row.credits) >= 0);
   svg.textContent = "";
-  if (!points.length) {
+  if (!points.length && !daily.length) {
     svg.style.display = "none";
     empty.style.display = "block";
     $("cycleLegend").textContent = "";
@@ -101,8 +70,8 @@ function renderCycleChart(cycles, references = []) {
   svg.style.display = "block";
   empty.style.display = "none";
   const width = Math.max(760, svg.parentElement.clientWidth || 960);
-  const height = 360;
-  const margin = { top: 28, right: 116, bottom: 78, left: 112 };
+  const height = svg.clientHeight || 270;
+  const margin = { top: 24, right: 88, bottom: 44, left: 88 };
   const plotWidth = width - margin.left - margin.right;
   const plotHeight = height - margin.top - margin.bottom;
   svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
@@ -110,8 +79,8 @@ function renderCycleChart(cycles, references = []) {
   const referenceValues = references.map((reference) => Number(reference.credits)).filter((value) => value > 0);
   const values = points.map((point) => Number(point.estimate.impliedWeeklyCredits));
   const allValues = [...values, ...referenceValues];
-  let minValue = Math.min(...allValues);
-  let maxValue = Math.max(...allValues);
+  let minValue = allValues.length ? Math.min(...allValues) : 0;
+  let maxValue = allValues.length ? Math.max(...allValues) : 1;
   if (minValue === maxValue) {
     minValue = Math.max(0, minValue * 0.8);
     maxValue *= 1.2;
@@ -121,20 +90,49 @@ function renderCycleChart(cycles, references = []) {
     maxValue += padding;
   }
 
-  const x = (index) => points.length === 1
-    ? margin.left + plotWidth / 2
-    : margin.left + (index / (points.length - 1)) * plotWidth;
-  const y = (value) => margin.top + ((maxValue - value) / (maxValue - minValue)) * plotHeight;
+  const dateEpoch = (iso) => Date.parse(`${iso}T12:00:00Z`);
+  const dateEpochs = [
+    ...daily.map((row) => dateEpoch(row.date)),
+    ...points.map((point) => dateEpoch(point.toDate))
+  ].filter(Number.isFinite);
+  let minDate = Math.min(...dateEpochs);
+  let maxDate = Math.max(...dateEpochs);
+  if (minDate === maxDate) {
+    minDate -= 43200000;
+    maxDate += 43200000;
+  }
+  const x = (iso) => margin.left + ((dateEpoch(iso) - minDate) / (maxDate - minDate)) * plotWidth;
+  const yLeft = (value) => margin.top + ((maxValue - value) / (maxValue - minValue)) * plotHeight;
+  const dailyMaxValue = Math.max(...daily.map((row) => Number(row.credits) || 0), 1);
+  const dailyMagnitude = 10 ** Math.floor(Math.log10(dailyMaxValue));
+  const dailyMax = Math.ceil((dailyMaxValue * 1.1) / dailyMagnitude) * dailyMagnitude;
+  const yRight = (value) => margin.top + (1 - value / dailyMax) * plotHeight;
   const tickCount = 5;
   const grid = svgElement("g", { class: "cycle-grid" });
   for (let index = 0; index <= tickCount; index += 1) {
     const value = minValue + ((maxValue - minValue) * index) / tickCount;
-    const yPosition = y(value);
+    const yPosition = yLeft(value);
+    const dailyValue = dailyMax * (index / tickCount);
     grid.append(
       svgElement("line", { x1: margin.left, y1: yPosition, x2: width - margin.right, y2: yPosition }),
-      svgElement("text", { x: margin.left - 12, y: yPosition + 4, "text-anchor": "end" })
+      svgElement("text", { x: margin.left - 10, y: yPosition + 4, "text-anchor": "end" }),
+      svgElement("text", { x: width - margin.right + 10, y: yPosition + 4, class: "daily-axis-text", "text-anchor": "start" })
     );
-    grid.lastChild.textContent = number(value, 0);
+    grid.children[grid.children.length - 2].textContent = number(value, 0);
+    grid.lastChild.textContent = number(dailyValue, 0);
+  }
+
+  const xTickSource = daily.length ? daily : points.map((point) => ({ date: point.toDate }));
+  const xTickIndexes = [...new Set(Array.from({ length: Math.min(6, xTickSource.length) }, (_, index) => (
+    Math.round((index * (xTickSource.length - 1)) / Math.max(1, Math.min(6, xTickSource.length) - 1))
+  )))];
+  for (const index of xTickIndexes) {
+    const date = xTickSource[index].date;
+    const xPosition = x(date);
+    grid.append(svgElement("line", { x1: xPosition, y1: margin.top + plotHeight, x2: xPosition, y2: margin.top + plotHeight + 5, class: "x-tick" }));
+    const label = svgElement("text", { x: xPosition, y: height - 13, class: "point-date", "text-anchor": "middle" });
+    label.textContent = shortDate(date);
+    grid.append(label);
   }
   svg.append(grid);
 
@@ -149,43 +147,69 @@ function renderCycleChart(cycles, references = []) {
 
   const axisTitles = svgElement("g", { class: "axis-titles" });
   const yTitle = svgElement("text", {
-    x: 22,
+    x: 18,
     y: margin.top + plotHeight / 2,
     class: "axis-title",
     "data-axis": "y",
     "text-anchor": "middle",
     "dominant-baseline": "middle",
-    transform: `rotate(-90 22 ${margin.top + plotHeight / 2})`
+    transform: `rotate(-90 18 ${margin.top + plotHeight / 2})`
   });
   yTitle.textContent = "预估周限额（credits/week）";
-  const xTitle = svgElement("text", { x: margin.left + plotWidth / 2, y: height - 8, class: "axis-title", "data-axis": "x", "text-anchor": "middle" });
-  xTitle.textContent = "周期（从旧到新）";
-  axisTitles.append(yTitle, xTitle);
+  const rightTitle = svgElement("text", {
+    x: width - 18,
+    y: margin.top + plotHeight / 2,
+    class: "axis-title daily-axis-title",
+    "text-anchor": "middle",
+    "dominant-baseline": "middle",
+    transform: `rotate(90 ${width - 18} ${margin.top + plotHeight / 2})`
+  });
+  rightTitle.textContent = "每日使用量（credits/day）";
+  axisTitles.append(yTitle, rightTitle);
   svg.append(axisTitles);
 
   const referenceLayer = svgElement("g", { class: "reference-layer" });
   for (const reference of references) {
     const value = Number(reference.credits);
     if (!(value >= minValue && value <= maxValue)) continue;
-    const yPosition = y(value);
+    const yPosition = yLeft(value);
     referenceLayer.append(svgElement("line", { x1: margin.left, y1: yPosition, x2: width - margin.right, y2: yPosition, class: "reference-line" }));
-    const label = svgElement("text", { x: width - margin.right + 10, y: yPosition + 4, class: "reference-label" });
+    const label = svgElement("text", { x: width - margin.right - 7, y: yPosition - 5, class: "reference-label", "text-anchor": "end" });
     label.textContent = reference.label;
     referenceLayer.append(label);
   }
   svg.append(referenceLayer);
 
-  const linePath = points.map((point, index) => `${index === 0 ? "M" : "L"} ${x(index)} ${y(point.estimate.impliedWeeklyCredits)}`).join(" ");
-  svg.append(svgElement("path", { d: linePath, class: "cycle-line" }));
+  if (daily.length) {
+    const baseline = margin.top + plotHeight;
+    const dailyLinePath = daily.map((row, index) => `${index === 0 ? "M" : "L"} ${x(row.date)} ${yRight(row.credits)}`).join(" ");
+    const dailyAreaPath = `${dailyLinePath} L ${x(daily.at(-1).date)} ${baseline} L ${x(daily[0].date)} ${baseline} Z`;
+    svg.append(svgElement("path", { d: dailyAreaPath, class: "daily-area" }));
+    svg.append(svgElement("path", { d: dailyLinePath, class: "daily-line" }));
+    const dailyPointLayer = svgElement("g", { class: "daily-point-layer" });
+    for (const row of daily) {
+      const point = svgElement("circle", { cx: x(row.date), cy: yRight(row.credits), r: 2.5, class: "daily-point" });
+      const title = svgElement("title");
+      title.textContent = `${row.date}：${number(row.credits, 0)} credits`;
+      point.append(title);
+      dailyPointLayer.append(point);
+    }
+    svg.append(dailyPointLayer);
+  }
+
+  if (points.length) {
+    const linePath = points.map((point, index) => `${index === 0 ? "M" : "L"} ${x(point.toDate)} ${yLeft(point.estimate.impliedWeeklyCredits)}`).join(" ");
+    svg.append(svgElement("path", { d: linePath, class: "cycle-line" }));
+  }
 
   const pointLayer = svgElement("g", { class: "point-layer" });
-  points.forEach((point, index) => {
-    const pointX = x(index);
-    const pointY = y(point.estimate.impliedWeeklyCredits);
+  points.forEach((point) => {
+    const pointX = x(point.toDate);
+    const pointY = yLeft(point.estimate.impliedWeeklyCredits);
     const range = point.estimate.roundingRange;
     if (range?.lower > 0 && range?.upper > 0) {
-      const lowY = y(Math.min(maxValue, range.upper));
-      const highY = y(Math.max(minValue, range.lower));
+      const lowY = yLeft(Math.min(maxValue, range.upper));
+      const highY = yLeft(Math.max(minValue, range.lower));
       pointLayer.append(
         svgElement("line", { x1: pointX, y1: lowY, x2: pointX, y2: highY, class: "range-line" }),
         svgElement("line", { x1: pointX - 5, y1: lowY, x2: pointX + 5, y2: lowY, class: "range-cap" }),
@@ -203,9 +227,6 @@ function renderCycleChart(cycles, references = []) {
     const valueLabel = svgElement("text", { x: pointX, y: pointY - 15, class: "point-value", "text-anchor": "middle" });
     valueLabel.textContent = number(point.estimate.impliedWeeklyCredits, 0);
     group.append(valueLabel);
-    const dateLabel = svgElement("text", { x: pointX, y: height - margin.bottom + 23, class: "point-date", "text-anchor": "middle" });
-    dateLabel.textContent = point.kind === "current" ? `${shortDate(point.fromDate)}–今` : `${shortDate(point.fromDate)}–${shortDate(point.toDate)}`;
-    group.append(dateLabel);
     pointLayer.append(group);
   });
   svg.append(pointLayer);
@@ -215,7 +236,8 @@ function renderCycleChart(cycles, references = []) {
   const legendItems = [
     ["cycle-estimate", "周期估计"],
     ["cycle-range", "±0.5 个百分点取整范围"],
-    ["cycle-reference", "套餐参考线"]
+    ["cycle-reference", "套餐参考线"],
+    ["daily-credits", "每日 credits（右轴）"]
   ];
   for (const [className, label] of legendItems) {
     const item = document.createElement("span");
@@ -233,35 +255,6 @@ function renderCycleChart(cycles, references = []) {
     detail.className = `cycle-detail ${point.kind === "current" ? "current" : ""}`;
     detail.innerHTML = `<span class="cycle-detail-date">${point.label}</span><strong>${number(point.estimate.impliedWeeklyCredits, 0)}</strong><small>${point.durationDays} 天 · ${point.usedPercent ?? "—"}% used</small>`;
     details.append(detail);
-  }
-}
-
-function renderPlanReferences(report, latestEstimate) {
-  const references = report.planReferences || [];
-  const detected = report.plan;
-  const rows = $("planRows");
-  rows.textContent = "";
-  if (!references.length) return;
-
-  if (detected?.id) {
-    const ratio = latestEstimate?.impliedWeeklyCredits && detected.credits
-      ? (latestEstimate.impliedWeeklyCredits / detected.credits) * 100
-      : null;
-    $("planStatus").textContent = `analytics 识别到 ${detected.label} · 最近周期估计约为参考额度的 ${percent(ratio)}`;
-  } else if (detected?.label) {
-    $("planStatus").textContent = `analytics 识别到 ${detected.label}，但没有匹配具体倍率；以下为静态参考值。`;
-  } else {
-    $("planStatus").textContent = "未从 analytics 识别具体套餐，以下为静态参考值。";
-  }
-
-  for (const reference of references) {
-    const row = document.createElement("div");
-    row.className = `plan-row ${detected?.id === reference.id ? "selected" : ""}`;
-    const ratio = detected?.id === reference.id && latestEstimate?.impliedWeeklyCredits
-      ? `${percent((latestEstimate.impliedWeeklyCredits / reference.credits) * 100)} · 最近周期估计`
-      : "对比待定";
-    row.innerHTML = `<div><strong>${reference.label}</strong><span>参考 ${reference.displayCredits} credits/week</span></div><b>${ratio}</b>`;
-    rows.append(row);
   }
 }
 
@@ -309,12 +302,9 @@ function renderReport(report) {
   $("dailyCredits").textContent = number(report.daily?.creditsInAvailableRange ?? report.daily?.creditsInRequestedRange);
   $("dailyCoverage").textContent = `${report.daily?.availableFrom || "—"} → ${report.daily?.availableTo || "—"}`;
   $("sourceLabel").textContent = report.source === "authenticated-browser" ? "页面已认证" : "未读取";
-  $("chartTotal").textContent = `${number(report.daily?.creditsInAvailableRange ?? report.daily?.creditsInRequestedRange)} credits`;
-  $("cycleSummary").textContent = `${cycles.filter((cycle) => cycle.estimate).length} 个可估算周期`;
+  $("cycleSummary").textContent = `${cycles.filter((cycle) => cycle.estimate).length} 个额度窗口 · ${number(report.daily?.creditsInAvailableRange ?? report.daily?.creditsInRequestedRange)} credits`;
   $("lastUpdated").textContent = `更新于 ${new Date().toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })}`;
-  renderCycleChart(cycles, report.planReferences);
-  renderDailyChart(report.daily?.rows);
-  renderPlanReferences(report, latestEstimate);
+  renderCycleChart(cycles, report.planReferences, report.daily?.rows);
   setStatus("统计完成。周期估计已更新。", "ready");
 }
 
@@ -357,7 +347,7 @@ async function connectToServer() {
 
 $("refreshButton").addEventListener("click", run);
 window.addEventListener("resize", () => {
-  if (state.report) renderCycleChart(state.report.cycles, state.report.planReferences);
+  if (state.report) renderCycleChart(state.report.cycles, state.report.planReferences, state.report.daily?.rows);
 });
 
 setStatus("正在连接 localhost 服务…", "busy");
